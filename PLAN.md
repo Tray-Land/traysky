@@ -204,7 +204,7 @@ _agent = new BlueskyAgent(new BlueskyAgentOptions
 {
     HttpClientOptions = new HttpClientOptions
     {
-        HttpUserAgent = $"Traysky/{version} (+https://github.com/TheJoeFin/Traysky)",
+        HttpUserAgent = $"Traysky/{version} (+https://github.com/Tray-Land/traysky)",
         Timeout = TimeSpan.FromSeconds(30),
     },
     // EnableBackgroundTokenRefresh stays true (default) — the agent refreshes for us.
@@ -313,12 +313,12 @@ Browser sign-in is the primary (accent) path on the login page; app passwords st
 collapsed "Use an app password instead" expander. Enter in the handle box starts browser sign-in
 unless an app password has been typed.
 
-- **Client identity:** `client_id` is `https://thejoefin.github.io/traysky/oauth/client-metadata.json`,
+- **Client identity:** `client_id` is `https://tray-land.github.io/traysky/oauth/client-metadata.json`,
   served by GitHub Pages from `docs/` on `main` (Pages must be enabled for the repo). Public native
   client: `application_type: native`, `token_endpoint_auth_method: none`, DPoP-bound tokens,
   scopes `atproto transition:generic transition:chat.bsky`.
 - **Redirect:** atproto requires a native custom scheme to be the client_id host reversed, so it
-  is `io.github.thejoefin:/traysky/callback`, declared as a `windows.protocol` in the manifest.
+  is `io.github.tray-land:/traysky/callback`, declared as a `windows.protocol` in the manifest.
   `OAuthCallbackPolicy` holds all of these constants; `OAuthCallbackPolicyTests` checks that the
   metadata file and the manifest agree with it. Moving to another host changes the scheme.
 - **Loopback is dev-only:** `http://127.0.0.1` redirects (idunno's `CallbackServer`) are only

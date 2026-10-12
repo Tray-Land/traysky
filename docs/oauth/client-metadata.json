@@ -1,11 +1,11 @@
 {
-  "client_id": "https://thejoefin.github.io/traysky/oauth/client-metadata.json",
+  "client_id": "https://tray-land.github.io/traysky/oauth/client-metadata.json",
   "client_name": "Traysky",
-  "client_uri": "https://thejoefin.github.io/traysky/",
+  "client_uri": "https://tray-land.github.io/traysky/",
   "application_type": "native",
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
-  "redirect_uris": ["io.github.thejoefin:/traysky/callback"],
+  "redirect_uris": ["io.github.tray-land:/traysky/callback"],
   "scope": "atproto transition:generic transition:chat.bsky",
   "token_endpoint_auth_method": "none",
   "dpop_bound_access_tokens": true

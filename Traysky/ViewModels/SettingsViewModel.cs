@@ -254,5 +254,5 @@ public sealed partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private Task OpenGitHub() => RichTextBuilder.OpenAsync("https://github.com/TheJoeFin/Traysky");
+    private Task OpenGitHub() => RichTextBuilder.OpenAsync("https://github.com/Tray-Land/traysky");
 }

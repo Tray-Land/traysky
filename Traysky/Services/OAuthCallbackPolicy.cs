@@ -16,10 +16,10 @@ namespace Traysky.Services;
 public static class OAuthCallbackPolicy
 {
     /// <summary>The URL of the published client metadata document, which doubles as the OAuth client id.</summary>
-    public const string ClientId = "https://thejoefin.github.io/traysky/oauth/client-metadata.json";
+    public const string ClientId = "https://tray-land.github.io/traysky/oauth/client-metadata.json";
 
-    /// <summary>Reverse-domain of thejoefin.github.io.</summary>
-    public const string Scheme = "io.github.thejoefin";
+    /// <summary>Reverse-domain of tray-land.github.io.</summary>
+    public const string Scheme = "io.github.tray-land";
 
     public const string CallbackPath = "/traysky/callback";
 

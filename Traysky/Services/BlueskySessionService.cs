@@ -65,7 +65,7 @@ public sealed partial class BlueskySessionService : ObservableObject
         {
             HttpClientOptions = new HttpClientOptions
             {
-                HttpUserAgent = $"Traysky/{version} (+https://github.com/TheJoeFin/Traysky)",
+                HttpUserAgent = $"Traysky/{version} (+https://github.com/Tray-Land/traysky)",
                 Timeout = TimeSpan.FromSeconds(30)
             },
 
