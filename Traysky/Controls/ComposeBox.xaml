@@ -144,6 +144,66 @@
                 Message="{x:Bind ViewModel.Error, Mode=OneWay}"
                 Severity="Error" />
 
+            <!--  Link preview, generated from the first link in the draft once typing pauses  -->
+            <ProgressBar
+                IsIndeterminate="True"
+                Visibility="{x:Bind ViewModel.HasLinkCardPlaceholder, Mode=OneWay}" />
+            <Border Style="{StaticResource EmbedCardStyle}" Visibility="{x:Bind ViewModel.HasLinkCard, Mode=OneWay}">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border
+                        Width="72"
+                        Height="72"
+                        Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                        CornerRadius="8,0,0,8"
+                        Visibility="{x:Bind ViewModel.HasLinkCardThumbnail, Mode=OneWay}">
+                        <Image Stretch="UniformToFill">
+                            <Image.Source>
+                                <BitmapImage DecodePixelWidth="160" UriSource="{x:Bind ViewModel.LinkCardThumbnail, Mode=OneWay}" />
+                            </Image.Source>
+                        </Image>
+                    </Border>
+                    <StackPanel
+                        Grid.Column="1"
+                        Margin="0,8,0,8"
+                        VerticalAlignment="Center"
+                        Spacing="4">
+                        <TextBlock
+                            Margin="0,0,0,2"
+                            Style="{StaticResource SecondaryTextStyle}"
+                            Text="{x:Bind ViewModel.LinkCardHost, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis" />
+                        <TextBlock
+                            FontWeight="SemiBold"
+                            MaxLines="2"
+                            Text="{x:Bind ViewModel.LinkCardTitle, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            MaxLines="2"
+                            Style="{StaticResource SecondaryTextStyle}"
+                            Text="{x:Bind ViewModel.LinkCardDescription, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="Wrap"
+                            Visibility="{x:Bind ViewModel.HasLinkCardDescription, Mode=OneWay}" />
+                    </StackPanel>
+                    <Button
+                        Grid.Column="2"
+                        Margin="0,4,4,0"
+                        Padding="4"
+                        VerticalAlignment="Top"
+                        Command="{x:Bind ViewModel.DismissLinkCardCommand}"
+                        Style="{StaticResource PostActionButtonStyle}"
+                        ToolTipService.ToolTip="Remove link preview">
+                        <FontIcon FontSize="11" Glyph="&#xE711;" />
+                    </Button>
+                </Grid>
+            </Border>
+
             <!--  Picked images / video, not yet uploaded  -->
             <ScrollViewer
                 HorizontalScrollBarVisibility="Auto"

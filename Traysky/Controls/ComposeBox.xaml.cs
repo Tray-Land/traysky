@@ -137,7 +137,10 @@ public sealed partial class ComposeBox : UserControl
     private string CurrentEditorText()
     {
         Editor.TextDocument.GetText(TextGetOptions.NoHidden, out string text);
-        return text;
+
+        // RichEditBox separates paragraphs with a lone \r. Bluesky (and the web client) expect \n,
+        // and a bare \r gets dropped or ignored there, which flattened multi-paragraph posts.
+        return text.Replace("\r\n", "\n").Replace('\r', '\n');
     }
 
     private void SetEditorText(string text)

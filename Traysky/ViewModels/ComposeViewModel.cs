@@ -48,6 +48,8 @@ public sealed partial class ComposeViewModel : ObservableObject
             OnPropertyChanged(nameof(ImageAttachmentCount));
             OnPropertyChanged(nameof(CanAttachImage));
             OnPropertyChanged(nameof(CanAttachVideo));
+            OnPropertyChanged(nameof(HasLinkCard));
+            OnPropertyChanged(nameof(HasLinkCardPlaceholder));
             PostCommand.NotifyCanExecuteChanged();
         };
     }
@@ -73,6 +75,8 @@ public sealed partial class ComposeViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasContext))]
     [NotifyPropertyChangedFor(nameof(ContextLabel))]
     [NotifyPropertyChangedFor(nameof(Placeholder))]
+    [NotifyPropertyChangedFor(nameof(HasLinkCard))]
+    [NotifyPropertyChangedFor(nameof(HasLinkCardPlaceholder))]
     public partial PostItem? QuoteOf { get; private set; }
 
     [ObservableProperty]
@@ -516,6 +520,132 @@ public sealed partial class ComposeViewModel : ObservableObject
         SettingsService.ComposeDraft = value;
         if (Error is not null)
             Error = null;
+
+        _ = UpdateLinkCardAsync(value);
+    }
+
+    private EmbeddedExternal? _linkCard;
+    private CancellationTokenSource? _linkCardCts;
+    private Uri? _linkCardUri;
+    private Uri? _dismissedLinkUri;
+
+    /// <summary>The card to preview and attach, hidden whenever images, video or a quote already use the post's one embed slot.</summary>
+    public bool HasLinkCard => _linkCard is not null && LinkCardPolicy.CanAttachCard(HasAttachments, QuoteOf is not null);
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasLinkCardPlaceholder))]
+    public partial bool IsLoadingLinkCard { get; private set; }
+
+    /// <summary>Shown while the card is being fetched, so the box doesn't jump in size only when it lands.</summary>
+    public bool HasLinkCardPlaceholder => IsLoadingLinkCard && LinkCardPolicy.CanAttachCard(HasAttachments, QuoteOf is not null);
+
+    public string LinkCardHost => _linkCardUri?.Host ?? string.Empty;
+
+    public string LinkCardTitle => _linkCard?.External.Title ?? string.Empty;
+
+    public string LinkCardDescription => _linkCard?.External.Description ?? string.Empty;
+
+    public bool HasLinkCardDescription => !string.IsNullOrEmpty(LinkCardDescription);
+
+    public Uri? LinkCardThumbnail { get; private set; }
+
+    public bool HasLinkCardThumbnail => LinkCardThumbnail is not null;
+
+    private void NotifyLinkCardChanged()
+    {
+        OnPropertyChanged(nameof(HasLinkCard));
+        OnPropertyChanged(nameof(HasLinkCardPlaceholder));
+        OnPropertyChanged(nameof(LinkCardHost));
+        OnPropertyChanged(nameof(LinkCardTitle));
+        OnPropertyChanged(nameof(LinkCardDescription));
+        OnPropertyChanged(nameof(HasLinkCardDescription));
+        OnPropertyChanged(nameof(LinkCardThumbnail));
+        OnPropertyChanged(nameof(HasLinkCardThumbnail));
+    }
+
+    private void ClearLinkCard()
+    {
+        _linkCardCts?.Cancel();
+        _linkCardCts = null;
+        _linkCardUri = null;
+        _linkCard = null;
+        LinkCardThumbnail = null;
+        IsLoadingLinkCard = false;
+        NotifyLinkCardChanged();
+    }
+
+    [RelayCommand]
+    private void DismissLinkCard()
+    {
+        _dismissedLinkUri = _linkCardUri;
+        ClearLinkCard();
+    }
+
+    /// <summary>
+    /// Keeps the link card in step with the draft: after typing pauses, the first link in the
+    /// text is looked up (Open Graph title/description/image, as bsky.app does) and previewed.
+    /// A link the user dismissed the card for stays dismissed until it leaves the text.
+    /// </summary>
+    private async Task UpdateLinkCardAsync(string text)
+    {
+        Uri? uri = LinkCardPolicy.FirstLink(text);
+
+        if (uri is null)
+        {
+            _dismissedLinkUri = null;
+            if (_linkCardUri is not null || _linkCardCts is not null)
+                ClearLinkCard();
+            return;
+        }
+
+        if (uri == _linkCardUri || uri == _dismissedLinkUri)
+            return;
+
+        // A different link than the one on screen or in flight: drop it and start over.
+        ClearLinkCard();
+        _dismissedLinkUri = null;
+
+        if (!BlueskySessionService.Instance.IsSignedIn)
+            return;
+
+        var cts = new CancellationTokenSource();
+        _linkCardCts = cts;
+        _linkCardUri = uri;
+        IsLoadingLinkCard = true;
+        OnPropertyChanged(nameof(LinkCardHost));
+
+        try
+        {
+            await Task.Delay(LinkCardPolicy.Debounce, cts.Token);
+
+            BlueskyAgent agent = BlueskySessionService.Instance.Agent;
+            EmbeddedExternal? card = await agent.CreateOpenGraphEmbeddedCardGenerator().Generate(uri, cts.Token);
+            cts.Token.ThrowIfCancellationRequested();
+
+            if (card is null)
+                return;
+
+            _linkCard = card;
+            LinkCardThumbnail = card.External.Thumbnail is { } blob
+                ? LinkCardPolicy.ThumbnailPreviewUri(agent.Did?.ToString(), blob.Reference.Link.ToString())
+                : null;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("Compose", $"Link preview for '{uri.Host}' failed: {ex.Message}");
+        }
+        finally
+        {
+            if (ReferenceEquals(_linkCardCts, cts))
+            {
+                IsLoadingLinkCard = false;
+                NotifyLinkCardChanged();
+            }
+        }
     }
 
     private bool CanPost() => !IsPosting && (PostTextPolicy.CanPost(Text) || (HasAttachments && !PostTextPolicy.IsOverLimit(Text)));
@@ -580,6 +710,17 @@ public sealed partial class ComposeViewModel : ObservableObject
                     builder = await builder.ReplyTo(ReplyTo.Reference, agent);
                 if (QuoteOf is not null)
                     builder.Add(QuoteOf.Reference);
+
+                await builder.ExtractFacets(agent.FacetExtractor, CancellationToken.None);
+                result = await agent.Post(builder);
+            }
+            else if (HasLinkCard && _linkCard is not null)
+            {
+                var builder = new PostBuilder(text, langs: new[] { lang });
+                builder.EmbedRecord(_linkCard);
+
+                if (ReplyTo is not null)
+                    builder = await builder.ReplyTo(ReplyTo.Reference, agent);
 
                 await builder.ExtractFacets(agent.FacetExtractor, CancellationToken.None);
                 result = await agent.Post(builder);

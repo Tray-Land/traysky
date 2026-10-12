@@ -34,7 +34,8 @@ public static class RichTextBuilder
         {
             if (segment.Kind == FacetKind.Plain || segment.Target is null)
             {
-                paragraph.Inlines.Add(new Run { Text = segment.Text });
+                // Older posts from this app carry lone \r paragraph breaks; show them as line breaks.
+                paragraph.Inlines.Add(new Run { Text = segment.Text.Replace("\r\n", "\n").Replace('\r', '\n') });
                 continue;
             }
 
