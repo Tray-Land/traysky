@@ -24,12 +24,28 @@
             <TitleBar.RightHeader>
                 <StackPanel Orientation="Horizontal" Spacing="2">
                     <Button
+                        x:Name="HomeButton"
+                        Click="HomeButton_Click"
+                        Style="{StaticResource TitleBarButtonStyle}"
+                        ToolTipService.ToolTip="Home"
+                        Visibility="{x:Bind ViewModel.ShowHome, Mode=OneWay}">
+                        <FontIcon FontSize="14" Glyph="&#xE80F;" />
+                    </Button>
+                    <Button
                         x:Name="NewPostButton"
                         Click="NewPostButton_Click"
                         Style="{StaticResource TitleBarButtonStyle}"
                         ToolTipService.ToolTip="New post (Ctrl+N)"
                         Visibility="{x:Bind ViewModel.IsSignedIn, Mode=OneWay}">
                         <FontIcon FontSize="14" Glyph="&#xE932;" />
+                    </Button>
+                    <Button
+                        x:Name="ExploreButton"
+                        Click="ExploreButton_Click"
+                        Style="{StaticResource TitleBarButtonStyle}"
+                        ToolTipService.ToolTip="Explore"
+                        Visibility="{x:Bind ViewModel.IsSignedIn, Mode=OneWay}">
+                        <FontIcon FontSize="14" Glyph="&#xE721;" />
                     </Button>
                     <Grid Visibility="{x:Bind ViewModel.IsSignedIn, Mode=OneWay}">
                         <Button

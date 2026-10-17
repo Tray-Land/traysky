@@ -60,6 +60,13 @@
           </uap:Protocol>
         </uap:Extension>
 
+        <!-- traysky: links open compose, a profile, a post or a hashtag; see DeepLinkPolicy. -->
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="traysky">
+            <uap:DisplayName>Traysky</uap:DisplayName>
+          </uap:Protocol>
+        </uap:Extension>
+
         <!-- Share sheet: puts Traysky in Windows' Share list for links, text, images and videos.
              A share opens the compose page; see ShareTargetService. The file types must match
              ComposeAttachmentPolicy's (a test checks). -->

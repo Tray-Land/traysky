@@ -244,7 +244,50 @@ public partial class App : Application
         // Whether it completes a sign-in or arrives stale, bring the flyout up so the user
         // lands back in the app instead of staring at the browser.
         if (BlueskySessionService.Instance.TryCompleteBrowserLogin(protocol.Uri))
+        {
             ShowFlyout(ShellDestination.Current);
+            return;
+        }
+
+        if (DeepLinkPolicy.TryParse(protocol.Uri, out DeepLink? link) && link is not null)
+            OpenDeepLink(link);
+    }
+
+    /// <summary>Opens what a <c>traysky:</c> link asked for; see <see cref="DeepLinkPolicy"/>.</summary>
+    private void OpenDeepLink(DeepLink link)
+    {
+        LogService.Info("App", $"Deep link: {link.Kind}");
+
+        switch (link.Kind)
+        {
+            case DeepLinkKind.Compose:
+                ShowFlyout(ShellDestination.Compose, () =>
+                {
+                    if (link.Text.Length > 0)
+                        _ = ComposeViewModel.Instance.AcceptShareAsync(new StagedShare(string.Empty, link.Text, []));
+                });
+                break;
+
+            case DeepLinkKind.Profile:
+                ShowFlyout(ShellDestination.Home, () => Pages.ProfilePage.Open(link.Actor));
+                break;
+
+            case DeepLinkKind.Post:
+                ShowFlyout(ShellDestination.Home, () => Pages.PostPage.Open(link.AtUri));
+                break;
+
+            case DeepLinkKind.Hashtag:
+                ShowFlyout(ShellDestination.Home, () => Pages.HashtagPage.Open(link.Text));
+                break;
+
+            case DeepLinkKind.JoinGroup:
+                ShowFlyout(ShellDestination.Messages, () =>
+                {
+                    if (_trayPopupWindow?.ContentRoot is { } root)
+                        _ = Helpers.GroupDialogs.JoinAsync(root, link.Text);
+                });
+                break;
+        }
     }
 
     // ---- Share target ----------------------------------------------------------------------
@@ -368,11 +411,11 @@ public partial class App : Application
     }
 
     /// <summary>Shows the flyout (never toggles) at a destination. Used by toasts and settings.</summary>
-    public void ShowFlyout(ShellDestination destination)
+    public void ShowFlyout(ShellDestination destination, Action? then = null)
     {
         WindowPlacementService.ClearPointerAnchor();
         EnsurePopupWindow();
-        _trayPopupWindow!.ShowAt(destination);
+        _trayPopupWindow!.ShowAt(destination, then: then);
     }
 
     public void HideFlyout() => _trayPopupWindow?.HidePopup();

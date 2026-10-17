@@ -145,7 +145,7 @@ public sealed partial class TrayPopupWindow : WindowEx
     /// Shows the popup (if hidden) and puts the shell on <paramref name="destination"/>. Used by
     /// tray actions and toast activation, which know where the user wants to land.
     /// </summary>
-    public void ShowAt(ShellDestination destination, DateTime? clickedAtUtc = null)
+    public void ShowAt(ShellDestination destination, DateTime? clickedAtUtc = null, Action? then = null)
     {
         if (!_isPopupVisible)
         {
@@ -155,7 +155,7 @@ public sealed partial class TrayPopupWindow : WindowEx
             ShowNearAnchor();
         }
 
-        _shellPage?.NavigateTo(destination);
+        _shellPage?.NavigateTo(destination, then);
     }
 
     /// <summary>
@@ -321,6 +321,9 @@ public sealed partial class TrayPopupWindow : WindowEx
     }
 
     private static int ScaleForDpi(int logical, uint dpi) => (int)Math.Round(logical * dpi / 96.0);
+
+    /// <summary>The root dialogs opened from outside a page (a deep link) attach to; null before the shell exists.</summary>
+    public Microsoft.UI.Xaml.XamlRoot? ContentRoot => _shellPage?.XamlRoot;
 
     private void EnsureShellPage()
     {

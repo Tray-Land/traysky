@@ -30,7 +30,11 @@ public sealed partial class ShellViewModel : ObservableObject
                 OnPropertyChanged(nameof(ShowTabs));
             }
         };
-        _navigation.NavigationChanged += (_, _) => OnPropertyChanged(nameof(ShowTabs));
+        _navigation.NavigationChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(ShowTabs));
+            OnPropertyChanged(nameof(ShowHome));
+        };
         _session.PropertyChanged += OnSessionChanged;
         _poll.PropertyChanged += OnPollChanged;
         _chat.PropertyChanged += OnChatChanged;
@@ -45,6 +49,11 @@ public sealed partial class ShellViewModel : ObservableObject
 
     /// <summary>The feed row shows on the timeline only; Settings and Notifications get the back button instead.</summary>
     public bool ShowTabs => _session.IsSignedIn && !_navigation.CanGoBack && IsRootPage(_navigation.Frame?.Content?.GetType());
+
+    /// <summary>The Home button shows whenever you are signed in and away from the timeline.</summary>
+    public bool ShowHome => _session.IsSignedIn
+        && _navigation.Frame?.Content is { } content
+        && !IsRootPage(content.GetType());
 
     public int UnreadCount => _poll.UnreadCount;
 
@@ -65,6 +74,7 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             OnPropertyChanged(nameof(IsSignedIn));
             OnPropertyChanged(nameof(ShowTabs));
+            OnPropertyChanged(nameof(ShowHome));
             OnPropertyChanged(nameof(ShowMessages));
         }
     }

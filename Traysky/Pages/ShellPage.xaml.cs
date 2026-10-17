@@ -1,10 +1,13 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Numerics;
 using Traysky.Models;
 using Traysky.Services;
 using Traysky.ViewModels;
@@ -33,6 +36,10 @@ public sealed partial class ShellPage : Page
 
     /// <summary>A destination asked for before the frame existed (first show), applied on Loaded.</summary>
     private ShellDestination? _pendingDestination;
+    private Action? _pendingThen;
+
+    /// <summary>Counts <see cref="NavigateTo"/> calls, so <see cref="ResetNavigation"/> can tell it was overtaken.</summary>
+    private int _navigationRequests;
 
     /// <summary>The video playing in the overlay, so it can be handed to the pop-out window.</summary>
     private VideoViewerRequest? _currentVideo;
@@ -44,6 +51,7 @@ public sealed partial class ShellPage : Page
         InitializeComponent();
         ViewModel = new ShellViewModel();
         DataContext = ViewModel;
+        ConfigureHomeButtonAnimations();
 
         BlueskySessionService.Instance.PropertyChanged += OnSessionPropertyChanged;
         FeedsService.Instance.Loaded += OnFeedsLoaded;
@@ -82,6 +90,52 @@ public sealed partial class ShellPage : Page
         return accelerator;
     }
 
+    /// <summary>
+    /// Pops the Home button in and out when its Visibility flips: a springy scale-up on show,
+    /// a quick scale-down on hide. Composition keeps the element alive until the hide finishes.
+    /// </summary>
+    private void ConfigureHomeButtonAnimations()
+    {
+        Visual visual = ElementCompositionPreview.GetElementVisual(HomeButton);
+        Compositor compositor = visual.Compositor;
+
+        // Scale about the button's centre, not its top-left corner.
+        HomeButton.SizeChanged += (_, e) =>
+            visual.CenterPoint = new Vector3((float)e.NewSize.Width / 2, (float)e.NewSize.Height / 2, 0);
+
+        Vector3KeyFrameAnimation scaleIn = compositor.CreateVector3KeyFrameAnimation();
+        scaleIn.Target = nameof(Visual.Scale);
+        scaleIn.InsertKeyFrame(0f, Vector3.Zero);
+        scaleIn.InsertKeyFrame(1f, Vector3.One, compositor.CreateCubicBezierEasingFunction(new Vector2(0.34f, 1.56f), new Vector2(0.64f, 1f)));
+        scaleIn.Duration = TimeSpan.FromMilliseconds(300);
+
+        ScalarKeyFrameAnimation fadeIn = compositor.CreateScalarKeyFrameAnimation();
+        fadeIn.Target = nameof(Visual.Opacity);
+        fadeIn.InsertKeyFrame(0f, 0f);
+        fadeIn.InsertKeyFrame(1f, 1f);
+        fadeIn.Duration = TimeSpan.FromMilliseconds(150);
+
+        Vector3KeyFrameAnimation scaleOut = compositor.CreateVector3KeyFrameAnimation();
+        scaleOut.Target = nameof(Visual.Scale);
+        scaleOut.InsertKeyFrame(1f, Vector3.Zero, compositor.CreateCubicBezierEasingFunction(new Vector2(0.36f, 0f), new Vector2(0.66f, -0.56f)));
+        scaleOut.Duration = TimeSpan.FromMilliseconds(200);
+
+        ScalarKeyFrameAnimation fadeOut = compositor.CreateScalarKeyFrameAnimation();
+        fadeOut.Target = nameof(Visual.Opacity);
+        fadeOut.InsertKeyFrame(1f, 0f);
+        fadeOut.Duration = TimeSpan.FromMilliseconds(200);
+
+        CompositionAnimationGroup show = compositor.CreateAnimationGroup();
+        show.Add(scaleIn);
+        show.Add(fadeIn);
+        CompositionAnimationGroup hide = compositor.CreateAnimationGroup();
+        hide.Add(scaleOut);
+        hide.Add(fadeOut);
+
+        ElementCompositionPreview.SetImplicitShowAnimation(HomeButton, show);
+        ElementCompositionPreview.SetImplicitHideAnimation(HomeButton, hide);
+    }
+
     private void Page_Loaded(object sender, RoutedEventArgs e)
     {
         UpdateTitleBarIcon();
@@ -91,8 +145,10 @@ public sealed partial class ShellPage : Page
 
         if (_pendingDestination is ShellDestination pending)
         {
+            Action? then = _pendingThen;
             _pendingDestination = null;
-            NavigateTo(pending);
+            _pendingThen = null;
+            NavigateTo(pending, then);
         }
     }
 
@@ -165,8 +221,13 @@ public sealed partial class ShellPage : Page
         // and that fetch would land *after* OnFeedsLoaded had already switched feeds, clobbering
         // the correct content with the wrong feed's posts. Already-loaded reopens resolve this
         // synchronously, so normal reopen timing is unaffected.
+        //
+        // If something navigated while the feeds were loading (a deep link or share opening
+        // compose on a cold start), that request is newer than this reset and must win.
+        int requestsBefore = _navigationRequests;
         await FeedsService.Instance.LoadIfNeededAsync();
-        NavigateTo(ShellDestination.Home);
+        if (_navigationRequests == requestsBefore)
+            NavigateTo(ShellDestination.Home);
 
         // Same reason as the feeds above: a restored session signed in before this page could
         // hear it. Also keeps the Messages badge fresh on every reopen.
@@ -179,13 +240,20 @@ public sealed partial class ShellPage : Page
         _ = TimelineViewModel.Instance.RefreshIfStaleAsync();
     }
 
-    public void NavigateTo(ShellDestination destination)
+    /// <param name="then">
+    /// Runs once the destination is showing, for a deep link that goes on to push a profile or
+    /// post. Skipped when signed out, since there is nothing to push onto the login page.
+    /// </param>
+    public void NavigateTo(ShellDestination destination, Action? then = null)
     {
         if (_navigation.Frame is null)
         {
             _pendingDestination = destination;
+            _pendingThen = then;
             return;
         }
+
+        _navigationRequests++;
 
         if (!BlueskySessionService.Instance.IsSignedIn)
         {
@@ -224,6 +292,8 @@ public sealed partial class ShellPage : Page
                 _navigation.ResetTo(typeof(TimelinePage));
                 break;
         }
+
+        then?.Invoke();
     }
 
     /// <summary>Makes sure some feed tab is selected before the timeline is shown, for the moment
@@ -304,7 +374,15 @@ public sealed partial class ShellPage : Page
         };
     }
 
+    private void HomeButton_Click(object sender, RoutedEventArgs e) => NavigateTo(ShellDestination.Home);
+
     private void NewPostButton_Click(object sender, RoutedEventArgs e) => NavigateTo(ShellDestination.Compose);
+
+    private void ExploreButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_navigation.Frame?.Content is not ExplorePage)
+            ExplorePage.Open();
+    }
 
     private void NotificationsButton_Click(object sender, RoutedEventArgs e) => NavigateTo(ShellDestination.Notifications);
 

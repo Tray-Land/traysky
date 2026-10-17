@@ -54,6 +54,45 @@
                 </StackPanel>
             </Border>
 
+            <!--  Profile  -->
+            <Border Style="{StaticResource SettingCardStyle}" Visibility="{x:Bind ViewModel.Session.IsSignedIn, Mode=OneWay}">
+                <StackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource SettingTitleStyle}" Text="Profile" />
+                    <TextBlock Style="{StaticResource SettingDescriptionStyle}" Text="Change your display name, bio, avatar and banner. These show on every Bluesky app." />
+                    <Button Click="EditProfile_Click" Content="Edit profile" />
+                </StackPanel>
+            </Border>
+
+            <!--  Feeds  -->
+            <Border Style="{StaticResource SettingCardStyle}" Visibility="{x:Bind ViewModel.Session.IsSignedIn, Mode=OneWay}">
+                <StackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource SettingTitleStyle}" Text="Your feeds" />
+                    <TextBlock Style="{StaticResource SettingDescriptionStyle}" Text="Choose which feeds are pinned as tabs on Home, and in what order. Pin a feed from Explore or from a profile's Feeds tab." />
+                    <Button Click="MyFeeds_Click" Content="Manage your feeds" />
+                </StackPanel>
+            </Border>
+
+            <!--  Timeline  -->
+            <Border Style="{StaticResource SettingCardStyle}">
+                <StackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource SettingTitleStyle}" Text="Timeline" />
+                    <TextBlock Style="{StaticResource SettingDescriptionStyle}" Text="When someone you follow replies, show the post they replied to above it, like bsky.app does." />
+                    <ToggleSwitch
+                        IsOn="{x:Bind ViewModel.ShowReplyContext, Mode=TwoWay}"
+                        OffContent="Show replies in context"
+                        OnContent="Show replies in context" />
+                </StackPanel>
+            </Border>
+
+            <!--  Blocked and muted  -->
+            <Border Style="{StaticResource SettingCardStyle}" Visibility="{x:Bind ViewModel.Session.IsSignedIn, Mode=OneWay}">
+                <StackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource SettingTitleStyle}" Text="Blocked and muted" />
+                    <TextBlock Style="{StaticResource SettingDescriptionStyle}" Text="Review the accounts you've blocked or muted, and undo either." />
+                    <Button Click="BlockedMuted_Click" Content="Manage blocked and muted accounts" />
+                </StackPanel>
+            </Border>
+
             <!--  Notifications  -->
             <Border Style="{StaticResource SettingCardStyle}">
                 <StackPanel Spacing="8">
@@ -82,6 +121,10 @@
                         OffContent="Quotes"
                         OnContent="Quotes" />
                     <ToggleSwitch
+                        IsOn="{x:Bind ViewModel.ToastSubscribedPosts, Mode=TwoWay}"
+                        OffContent="Posts from accounts you turned the bell on for"
+                        OnContent="Posts from accounts you turned the bell on for" />
+                    <ToggleSwitch
                         IsOn="{x:Bind ViewModel.ToastFollows, Mode=TwoWay}"
                         OffContent="Followers"
                         OnContent="Followers" />
@@ -89,6 +132,18 @@
                         IsOn="{x:Bind ViewModel.ToastLikesReposts, Mode=TwoWay}"
                         OffContent="Likes and reposts (summarised)"
                         OnContent="Likes and reposts (summarised)" />
+                </StackPanel>
+            </Border>
+
+            <!--  Notifications on your Bluesky account  -->
+            <Border Style="{StaticResource SettingCardStyle}" Visibility="{x:Bind ViewModel.Session.IsSignedIn, Mode=OneWay}">
+                <StackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource SettingTitleStyle}" Text="Bluesky notification settings" />
+                    <TextBlock Style="{StaticResource SettingDescriptionStyle}" Text="Choose which kinds of notification Bluesky sends you, and who they can come from. These follow your account to every app." />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Click="NotificationPreferences_Click" Content="Notification types" />
+                        <Button Click="ActivitySubscriptions_Click" Content="Accounts with the bell on" />
+                    </StackPanel>
                 </StackPanel>
             </Border>
 

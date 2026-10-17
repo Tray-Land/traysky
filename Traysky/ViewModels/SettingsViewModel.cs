@@ -68,6 +68,14 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
     }
 
+    // ---- Timeline ------------------------------------------------------------------------
+
+    public bool ShowReplyContext
+    {
+        get => SettingsService.ShowReplyContext;
+        set { SettingsService.ShowReplyContext = value; OnPropertyChanged(); }
+    }
+
     // ---- Toasts --------------------------------------------------------------------------
 
     public bool ToastMentions
@@ -86,6 +94,12 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         get => SettingsService.ToastQuotes;
         set { SettingsService.ToastQuotes = value; OnPropertyChanged(); }
+    }
+
+    public bool ToastSubscribedPosts
+    {
+        get => SettingsService.ToastSubscribedPosts;
+        set { SettingsService.ToastSubscribedPosts = value; OnPropertyChanged(); }
     }
 
     public bool ToastFollows

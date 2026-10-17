@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using idunno.AtProto;
 using idunno.AtProto.Repo;
 using Traysky.ViewModels.Items;
@@ -69,6 +70,11 @@ public static class PreviewMode
             {
                 AtUri = "at://did:plc:preview2/app.bsky.feed.post/3k000002", Cid = "bafy2", Reference = FakeRef(2),
                 AuthorDid = "did:plc:preview2", AuthorHandle = "blowdart.bsky.social", AuthorDisplayName = "Barry Dorrans",
+                AuthorLabels =
+                [
+                    new LabelDisplay("sexual", "Sexually suggestive", "Does not include nudity.", LabelSeverity.Alert, "Bluesky Moderation Service", false),
+                    new LabelDisplay("dotnet-dev", ".NET developer", "Writes software on the .NET platform.", LabelSeverity.Inform, "Community Labeler", false)
+                ],
                 Text = t2,
                 Segments = FacetSegmenter.Segment(t2,
                 [
@@ -125,6 +131,47 @@ public static class PreviewMode
         ];
     }
 
+    /// <summary>
+    /// The sample posts as timeline rows, with two sample replies: one to a single post and one
+    /// deep in a thread (so the connector lines and the "Load more" row show up).
+    /// </summary>
+    public static List<object> SampleTimelineRows(bool includeContext)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        PostItem Make(int n, string handle, string name, string text, DateTimeOffset at, bool lineAbove = false, bool lineBelow = false) => new()
+        {
+            AtUri = $"at://did:plc:preview{n}/app.bsky.feed.post/3k{n:d6}", Cid = $"bafy{n}", Reference = FakeRef(n),
+            AuthorDid = $"did:plc:preview{n}", AuthorHandle = handle, AuthorDisplayName = name,
+            Text = text, Segments = FacetSegmenter.Segment(text, null),
+            CreatedAt = at, LikeCount = n % 7, ReplyCount = n % 3,
+            // Context posts never carry a "Replying to" label (see FeedMapper.ContextPost).
+            ReplyingTo = lineBelow ? string.Empty : "joe.bsky.social",
+            ThreadLineAbove = lineAbove, ThreadLineBelow = lineBelow,
+            WebUrl = $"https://bsky.app/profile/{handle}/post/3k{n:d6}"
+        };
+
+        List<PostItem> posts = SamplePosts();
+        List<object> rows = [];
+
+        if (includeContext)
+        {
+            // A reply straight to someone's post.
+            rows.Add(Make(11, "joe.bsky.social", "Joe Finney", "Anyone know a good way to test a WinUI tray flyout?", now.AddMinutes(-9), lineBelow: true));
+            rows.Add(Make(12, "blowdart.bsky.social", "Barry Dorrans", "Drive it with a preview flag and sample data, then trust nothing.", now.AddMinutes(-6), lineAbove: true));
+
+            // A reply deep in a thread: first post, Load more, the post replied to, the reply.
+            PostItem deepReply = Make(15, "photos.bsky.social", "Photo Person", "Same here, and it only reproduces on ARM.", now.AddMinutes(-3), lineAbove: true);
+            rows.Add(Make(13, "joe.bsky.social", "Joe Finney", "Shipped 1.3.0 today. The flyout is much snappier.", now.AddHours(-1), lineBelow: true));
+            rows.Add(new ThreadGapItem { Reply = deepReply, RootUri = "at://did:plc:preview13/app.bsky.feed.post/3k000013", ParentUri = "at://did:plc:preview14/app.bsky.feed.post/3k000014" });
+            rows.Add(Make(14, "blowdart.bsky.social", "Barry Dorrans", "Nice. Did the idle memory number come down too?", now.AddMinutes(-20), lineAbove: true, lineBelow: true));
+            rows.Add(deepReply);
+        }
+
+        rows.AddRange(posts);
+        return rows;
+    }
+
     public static List<NotificationItem> SampleNotifications()
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -173,6 +220,143 @@ public static class PreviewMode
         }
     ];
 
+    /// <summary>Accounts for the Blocked / Muted screen.</summary>
+    public static List<ActorItem> SampleManagedAccounts(bool blocks)
+    {
+        string label = ManagedAccountsPolicy.ActionLabel(blocks);
+        string? Uri(int n) => blocks ? $"at://did:plc:preview-self/app.bsky.graph.block/3kb00{n}" : null;
+        return
+        [
+            new ActorItem { Did = "did:plc:preview-m1", Handle = "spammer.bsky.social", DisplayName = "Totally Real Giveaways", BlockUri = Uri(1), ManagedActionLabel = label },
+            new ActorItem { Did = "did:plc:preview-m2", Handle = "argue.bsky.social", DisplayName = "Always Arguing", BlockUri = Uri(2), ManagedActionLabel = label },
+            new ActorItem { Did = "did:plc:preview-m3", Handle = "quiet.example.com", BlockUri = Uri(3), ManagedActionLabel = label }
+        ];
+    }
+
+    /// <summary>Accounts whose bell is on, for the notification-bell list.</summary>
+    public static List<ActorItem> SampleActivitySubscriptions() =>
+    [
+        new ActorItem { Did = "did:plc:preview1", Handle = "joe.bsky.social", DisplayName = "Joe Finney", ManagedActionLabel = "Turn off", ManagedDetail = "Posts and replies" },
+        new ActorItem { Did = "did:plc:preview-s3", Handle = "dotnet.example.com", DisplayName = ".NET Community", ManagedActionLabel = "Turn off", ManagedDetail = "Posts" }
+    ];
+
+    /// <summary>Accounts for the search page's People tab and a starter pack's members.</summary>
+    public static List<ActorItem> SampleSearchActors() =>
+    [
+        new ActorItem { Did = "did:plc:preview1", Handle = "joe.bsky.social", DisplayName = "Joe Finney" },
+        new ActorItem { Did = "did:plc:preview2", Handle = "blowdart.bsky.social", DisplayName = "Barry Dorrans" },
+        new ActorItem { Did = "did:plc:preview-s3", Handle = "dotnet.example.com", DisplayName = ".NET Community" }
+    ];
+
+    /// <summary>Starter packs for the search page's Starter packs tab.</summary>
+    public static List<StarterPackItem> SampleStarterPacks() =>
+    [
+        new StarterPackItem
+        {
+            Name = ".NET developers", Description = "People posting about C#, F# and the .NET platform.",
+            CreatorHandle = "joe.bsky.social", MemberCount = 42, JoinedCount = 310,
+            AtUri = "at://did:plc:preview1/app.bsky.graph.starterpack/3kp001",
+            ListUri = "at://did:plc:preview1/app.bsky.graph.list/3kl001",
+            WebUrl = "https://bsky.app/starter-pack/joe.bsky.social/3kp001"
+        },
+        new StarterPackItem
+        {
+            Name = "Windows desktop", CreatorHandle = "blowdart.bsky.social", MemberCount = 17,
+            AtUri = "at://did:plc:preview2/app.bsky.graph.starterpack/3kp002",
+            ListUri = "at://did:plc:preview2/app.bsky.graph.list/3kl002",
+            WebUrl = "https://bsky.app/starter-pack/blowdart.bsky.social/3kp002"
+        }
+    ];
+
+    /// <summary>Lists for a profile's Lists tab, owned by the preview account so they can be edited.</summary>
+    public static List<ListItem> SampleLists() =>
+    [
+        new ListItem
+        {
+            Uri = "at://did:plc:preview-self/app.bsky.graph.list/3kl101", Name = "Windows devs",
+            Description = "People building for Windows.", Kind = ListKind.Curate, MemberCount = 3,
+            CreatorDid = SelfDid, CreatorHandle = Handle
+        },
+        new ListItem
+        {
+            Uri = "at://did:plc:preview-self/app.bsky.graph.list/3kl102", Name = "Mute: engagement bait",
+            Kind = ListKind.Moderation, MemberCount = 1,
+            CreatorDid = SelfDid, CreatorHandle = Handle
+        },
+        new ListItem
+        {
+            Uri = "at://did:plc:preview1/app.bsky.graph.list/3kl103", Name = "Spam accounts",
+            Description = "Shared block list of known spam.", Kind = ListKind.Moderation, MemberCount = 240,
+            CreatorDid = "did:plc:preview1", CreatorHandle = "alice.example.com", IsMuted = true
+        }
+    ];
+
+    /// <summary>Checkbox rows for the "Add to list" dialog.</summary>
+    public static List<ListMembershipItem> SampleMemberships()
+    {
+        List<ListItem> lists = SampleLists();
+        return [new ListMembershipItem(lists[0], "at://did:plc:preview1/app.bsky.graph.listitem/3kli01"), new ListMembershipItem(lists[1], null)];
+    }
+
+    /// <summary>Saved drafts for the compose box's Drafts flyout: a plain one, one with reply limits, and one written elsewhere with media.</summary>
+    public static List<DraftItem> SampleDrafts() =>
+    [
+        new DraftItem { Text = "Thinking about a tray app for tracking release notes, anyone else want one?", Age = "12m" },
+        new DraftItem
+        {
+            Text = "Small announcement coming tomorrow.\n\nStay tuned.",
+            Reply = new ReplyChoice(ReplyAudience.Limited, Followers: true),
+            AllowQuotes = false,
+            Age = "2h"
+        },
+        new DraftItem
+        {
+            Text = "Sunset from the ferry tonight",
+            Age = "3d",
+            Note = DraftPolicy.RestoreNote(2, 0)
+        }
+    ];
+
+    /// <summary>Feeds for a profile's Feeds tab.</summary>
+    public static List<FeedSuggestionItem> SampleFeedSuggestions() =>
+    [
+        new FeedSuggestionItem
+        {
+            AtUri = DotNetNewsFeed, IsPinned = true,
+            DisplayName = ".NET News", Description = "Release notes, blog posts and community links for .NET.",
+            CreatorHandle = "joe.bsky.social", LikeCount = 1280,
+            WebUrl = "https://bsky.app/profile/did:plc:preview1/feed/dotnet-news"
+        },
+        new FeedSuggestionItem
+        {
+            AtUri = DesktopDevsFeed,
+            DisplayName = "Desktop devs", CreatorHandle = "blowdart.bsky.social", LikeCount = 96,
+            WebUrl = "https://bsky.app/profile/did:plc:preview2/feed/desktop-devs"
+        }
+    ];
+
+    private const string DotNetNewsFeed = "at://did:plc:preview1/app.bsky.feed.generator/dotnet-news";
+    private const string DesktopDevsFeed = "at://did:plc:preview2/app.bsky.feed.generator/desktop-devs";
+
+    /// <summary>The saved-feeds list behind "Your feeds": Following and one feed pinned, one feed saved but not pinned.</summary>
+    public static List<SavedFeedEntry> SampleSavedFeeds() =>
+    [
+        new("pv-1", SavedFeedPolicy.TimelineType, "following", true),
+        new("pv-2", SavedFeedPolicy.FeedType, DotNetNewsFeed, true),
+        new("pv-3", SavedFeedPolicy.FeedType, DesktopDevsFeed, false)
+    ];
+
+    /// <summary>Names for <see cref="SampleSavedFeeds"/>, keyed by entry value.</summary>
+    public static Dictionary<string, SavedFeedLabel> SampleSavedFeedLabels() => new()
+    {
+        [DotNetNewsFeed] = new SavedFeedLabel(".NET News", null),
+        [DesktopDevsFeed] = new SavedFeedLabel("Desktop devs", null)
+    };
+
+    /// <summary>The preview account's profile as the editor first shows it.</summary>
+    public static (string DisplayName, string Bio) SampleProfileText() =>
+        ("Joe Finney", "Building small Windows tray apps. Opinions are my own and mostly about XAML.");
+
     /// <summary>The preview account's DID, so its sample messages line up on the "mine" side.</summary>
     public const string SelfDid = "did:plc:preview-self";
 
@@ -196,12 +380,77 @@ public static class PreviewMode
             {
                 Id = "preview-convo-3", Title = "Barry Dorrans", Subtitle = "@blowdart.bsky.social", OtherProfileKey = "blowdart.bsky.social",
                 LastMessagePreview = "You: Thanks, will do", LastMessageAt = now.AddDays(-3)
-            }
+            },
+            SampleNewGroup("Tray app club", 3)
+        ];
+    }
+
+    /// <summary>The preview account's own group, as it appears in the Messages list and when one is created.</summary>
+    public static ConversationItem SampleNewGroup(string name, int others)
+    {
+        Dictionary<string, ActorItem> members = SampleGroupMembers().ToDictionary(m => m.Actor.Did, m => m.Actor, StringComparer.Ordinal);
+        long count = others + 1;
+        return new ConversationItem
+        {
+            Id = "preview-group-1",
+            Title = name,
+            Subtitle = GroupChatPolicy.MemberCountText(count, 100),
+            IsGroup = true,
+            IsOwner = true,
+            MemberCount = count,
+            MemberLimit = 100,
+            Members = members,
+            LastMessagePreview = "Joe Finney: Anyone tried the new group chats?",
+            LastMessageAt = DateTimeOffset.UtcNow.AddMinutes(-12),
+            UnreadCount = 0
+        };
+    }
+
+    /// <summary>Who is in the sample group: the preview account (owner) and two others.</summary>
+    public static List<GroupMember> SampleGroupMembers() =>
+    [
+        new GroupMember(new ActorItem { Did = SelfDid, Handle = "preview.bsky.social", DisplayName = "Preview Account" }, true),
+        new GroupMember(new ActorItem { Did = "did:plc:preview-joe", Handle = "joe.bsky.social", DisplayName = "Joe Finney" }, false),
+        new GroupMember(new ActorItem { Did = "did:plc:preview-barry", Handle = "blowdart.bsky.social", DisplayName = "Barry Dorrans" }, false)
+    ];
+
+    /// <summary>What a pasted join link shows, so the join dialog can be seen without an account.</summary>
+    public static GroupJoinPreview SampleJoinPreview(string code) =>
+        new(code, "Tray app club", "Joe Finney", 3, 100, RequireApproval: true, FollowedByOwnerOnly: false,
+            IsDisabled: false, IsInvalid: false, RequestPending: false, AlreadyIn: null);
+
+    private static List<MessageItem> SampleGroupMessages(ConversationItem group)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        MessageItem Line(int n, string text, DateTimeOffset at) => new()
+        {
+            Id = $"{group.Id}-{n}", IsSystem = true, IsInGroup = true, Text = text,
+            Segments = FacetSegmenter.Segment(text, null), SentAt = at
+        };
+
+        MessageItem Msg(int n, string did, string who, string text, DateTimeOffset at) => new()
+        {
+            Id = $"{group.Id}-{n}", SenderDid = did, SenderName = who, IsMine = did == SelfDid, IsInGroup = true,
+            Text = text, Segments = FacetSegmenter.Segment(text, null), SentAt = at
+        };
+
+        return
+        [
+            Line(1, GroupChatPolicy.EventText(GroupEvent.MemberAdded, "You", "Joe Finney"), now.AddHours(-3)),
+            Line(2, GroupChatPolicy.EventText(GroupEvent.MemberAdded, "You", "Barry Dorrans"), now.AddHours(-3)),
+            Msg(3, SelfDid, "Preview Account", "Welcome both. This is where we swap tray app ideas.", now.AddHours(-2)),
+            Msg(4, "did:plc:preview-barry", "Barry Dorrans", "Nice. I have opinions about flyouts.", now.AddMinutes(-40)),
+            Line(5, GroupChatPolicy.EventText(GroupEvent.MemberJoined, string.Empty, "Alice Example"), now.AddMinutes(-20)),
+            Msg(6, "did:plc:preview-joe", "Joe Finney", "Anyone tried the new group chats?", now.AddMinutes(-12))
         ];
     }
 
     public static List<MessageItem> SampleMessages(ConversationItem conversation)
     {
+        if (conversation.IsGroup)
+            return SampleGroupMessages(conversation);
+
         DateTimeOffset now = DateTimeOffset.UtcNow;
         string them = "did:plc:" + conversation.Id;
 

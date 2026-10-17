@@ -23,11 +23,16 @@ public static class SettingsService
     private const string ToastMentionsKey = "ToastMentions";
     private const string ToastRepliesKey = "ToastReplies";
     private const string ToastQuotesKey = "ToastQuotes";
+    private const string ToastSubscribedPostsKey = "ToastSubscribedPosts";
     private const string ToastFollowsKey = "ToastFollows";
     private const string ToastLikesRepostsKey = "ToastLikesReposts";
+    private const string ShowReplyContextKey = "ShowReplyContext";
     private const string LastFeedKeyKey = "LastFeedKey";
     private const string ComposeDraftKey = "ComposeDraft";
     private const string RecentHashtagsKey = "RecentHashtags";
+    private const string FollowedHashtagsKey = "FollowedHashtags";
+    private const string RecentSearchesKey = "RecentSearches";
+    private const string ChatLogCursorKey = "ChatLogCursor";
 
     /// <summary>Raised when <see cref="PollIntervalSeconds"/> changes so the poller can re-arm its timer.</summary>
     public static event EventHandler? PollIntervalChanged;
@@ -116,6 +121,13 @@ public static class SettingsService
         set => Set(ToastQuotesKey, value);
     }
 
+    /// <summary>Posts from accounts whose bell you turned on. On by default: you asked for them.</summary>
+    public static bool ToastSubscribedPosts
+    {
+        get => GetBool(ToastSubscribedPostsKey, true);
+        set => Set(ToastSubscribedPostsKey, value);
+    }
+
     public static bool ToastFollows
     {
         get => GetBool(ToastFollowsKey, false);
@@ -126,6 +138,13 @@ public static class SettingsService
     {
         get => GetBool(ToastLikesRepostsKey, false);
         set => Set(ToastLikesRepostsKey, value);
+    }
+
+    /// <summary>Whether a reply in the timeline shows the post it replies to (and the thread's first post) above it.</summary>
+    public static bool ShowReplyContext
+    {
+        get => GetBool(ShowReplyContextKey, true);
+        set => Set(ShowReplyContextKey, value);
     }
 
     /// <summary><see cref="ViewModels.Items.FeedTabItem.Key"/> of the feed tab last shown, so the flyout
@@ -153,6 +172,38 @@ public static class SettingsService
         }
         set => Set(RecentHashtagsKey, string.Join('\n', value ?? []));
     }
+
+    /// <summary>Hashtags followed in this app (no leading #), shown as extra feed tabs. Local only; not synced with bsky.app.</summary>
+    public static IReadOnlyList<string> FollowedHashtags
+    {
+        get
+        {
+            string raw = GetString(FollowedHashtagsKey, string.Empty);
+            return raw.Length == 0 ? [] : raw.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        }
+        set => Set(FollowedHashtagsKey, string.Join('\n', value ?? []));
+    }
+
+    /// <summary>Queries submitted on the search page, most-recent first (see <see cref="SearchQueryPolicy"/>).</summary>
+    public static IReadOnlyList<string> RecentSearches
+    {
+        get
+        {
+            string raw = GetString(RecentSearchesKey, string.Empty);
+            return raw.Length == 0 ? [] : raw.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        }
+        set => Set(RecentSearchesKey, string.Join('\n', value ?? []));
+    }
+
+    /// <summary>Where the chat log sync left off for <paramref name="did"/>; null when it hasn't run for that account.</summary>
+    public static string? GetChatLogCursor(string did)
+    {
+        string[] parts = GetString(ChatLogCursorKey, string.Empty).Split('\n');
+        return parts.Length == 2 && parts[0] == did && parts[1].Length > 0 ? parts[1] : null;
+    }
+
+    public static void SetChatLogCursor(string did, string? cursor) =>
+        Set(ChatLogCursorKey, string.IsNullOrEmpty(cursor) ? string.Empty : did + '\n' + cursor);
 
     private static TrayClickAction GetAction(string key, TrayClickAction fallback) =>
         TrayClickPolicy.Parse(GetInt(key, (int)fallback), fallback);

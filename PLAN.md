@@ -347,7 +347,7 @@ Chat goes through the PDS's chat proxy (`atproto-proxy: did:web:api.bsky.chat`),
 
 - **Access check:** a session only gets into chat if it was granted DM access: an app password
   made with "Allow access to your direct messages", or an OAuth grant with `transition:chat.bsky`.
-  There's no call that reports the grant, so `ChatService` makes a real `listConvos` call on
+  There's no call that reports the grant, so `ChatService` makes a real `getUnreadCounts` call on
   sign-in and on each flyout reopen (at most every 30 s). `ChatAccessPolicy.FromProbe` reads the
   result: success allows chat, a 4xx (400 "Bad token scope", 401/403 for a missing scope,
   404/501 when the PDS has no chat proxy) denies it, and offline, 5xx or 429 keep the last answer.
@@ -358,12 +358,20 @@ Chat goes through the PDS's chat proxy (`atproto-proxy: did:web:api.bsky.chat`),
   Sessions signed in before the scope was added need to sign in again to get DMs.
 - **Pages:** `MessagesPage` (conversations, requests labelled, unread badges) →
   `ConversationPage` (bubbles grouped into runs by `ChatThreadPolicy`, older pages as you scroll
-  up, a 5 s poll while open and visible, Enter to send). Opening a conversation marks it read.
+  up, a 5 s sync while open and visible, Enter to send). Opening a conversation marks it read.
+  Requests in the list have Accept / Decline buttons (decline = `LeaveConversation`); the
+  conversation's "..." menu mutes / unmutes, accepts a request, or leaves; each message's menu
+  has "Delete for me" (`DeleteMessageForSelf`, removed at once and put back if refused).
   Profiles get a Message button when `ChatAccessPolicy.CanOfferMessage` agrees with their
   `allowIncoming` setting.
-- **Unread count:** the number of accepted, unmuted conversations with unread messages,
-  refreshed on reopen and Ctrl+R only. It isn't polled in the background and doesn't feed the
-  tray badge or toasts.
+- **Unread count:** `getUnreadCounts` (accepted conversations only, server-capped at 100),
+  refreshed on reopen, Ctrl+R and the notification poll. It feeds the tray badge and tooltip.
+- **Live sync:** an open conversation follows `getLog` instead of re-reading messages. The
+  cursor is saved per account (`SettingsService.GetChatLogCursor`), so the first-ever call only
+  establishes a starting point. `ChatMapper.ToLogEntry` strips log entries to `ChatLogEntry`,
+  and `ChatThreadPolicy.Reduce` turns a batch into what to add, remove, mute or close. Until
+  the log has handed back a cursor, or when it fails, the page falls back to reading the latest
+  messages. Reaction entries trigger one message read to refresh reactions.
 
 ---
 

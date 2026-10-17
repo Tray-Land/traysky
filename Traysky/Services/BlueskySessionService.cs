@@ -427,6 +427,9 @@ public sealed partial class BlueskySessionService : ObservableObject
         }
     }
 
+    /// <summary>Re-reads the signed-in account's name and avatar, after the profile editor changed them.</summary>
+    public Task RefreshProfileAsync() => LoadProfileAsync(CancellationToken.None);
+
     private async Task LoadProfileAsync(CancellationToken cancellationToken)
     {
         try
