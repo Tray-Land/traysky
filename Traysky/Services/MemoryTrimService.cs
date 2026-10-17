@@ -16,6 +16,8 @@ public static class MemoryTrimService
 
     public static void Trim()
     {
+        ProfileCacheService.Instance.Clear();
+
         // Aggressive mode (.NET 7+) compacts every generation, including the LOH, and then
         // decommits the GC's free space back to the OS instead of keeping it around for reuse.
         // The managed heap here is only a few MB, so the full blocking collection is cheap.
