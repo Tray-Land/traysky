@@ -66,6 +66,12 @@ public sealed partial class TimelinePage : Page
         PostPage.Open(post);
     }
 
+    private void GapButton_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is ViewModels.Items.ThreadGapItem gap)
+            ViewModel.ExpandGapCommand.Execute(gap);
+    }
+
     private async void RefreshContainer_RefreshRequested(RefreshContainer sender, RefreshRequestedEventArgs args)
     {
         // Holding the deferral keeps the spinner up until the fetch lands.

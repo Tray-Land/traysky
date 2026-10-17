@@ -31,6 +31,58 @@ public static class FeedMapper
         return ToPostItem(feedPost.Post, repostedBy, replyingTo);
     }
 
+    /// <summary>
+    /// A feed entry as the timeline's rows: for a reply (when <paramref name="includeContext"/>),
+    /// the thread's first post, a <see cref="ThreadGapItem"/> if posts in between are hidden, and
+    /// the post replied to, each joined to the next by a connector line, then the reply itself.
+    /// Anything else (or a reply whose parent is deleted or blocked) is just the post.
+    /// </summary>
+    public static List<object> ToTimelineRows(FeedViewPost feedPost, bool includeContext)
+    {
+        PostItem main = ToPostItem(feedPost);
+        List<object> rows = [];
+
+        // A repost shows the reposted post as it is, with no thread above it.
+        if (includeContext
+            && feedPost.Reason is not ReasonRepost
+            && feedPost.Reply?.Parent is PostView parent)
+        {
+            PostView? root = feedPost.Reply.Root as PostView;
+            string parentUri = parent.Uri.ToString();
+            string? rootUri = root?.Uri.ToString();
+
+            ReplyContextShape shape = ReplyContextPolicy.Classify(rootUri, parentUri, parent.Record?.Reply?.Parent?.Uri?.ToString());
+
+            if (shape is ReplyContextShape.RootAndParent or ReplyContextShape.RootGapParent)
+                rows.Add(ContextPost(root!, lineAbove: false));
+
+            if (shape == ReplyContextShape.RootGapParent)
+                rows.Add(new ThreadGapItem { Reply = main, RootUri = rootUri!, ParentUri = parentUri });
+
+            // Every shape but None ends with the post replied to, then the reply.
+            if (shape != ReplyContextShape.None)
+            {
+                rows.Add(ContextPost(parent, lineAbove: rows.Count > 0));
+                main.ThreadLineAbove = true;
+            }
+        }
+
+        rows.Add(main);
+        return rows;
+    }
+
+    /// <summary>
+    /// A post shown only as context for a reply below it. Never labelled "Replying to": the line
+    /// to the row above says so, and a parent's own parent handle isn't in the feed anyway.
+    /// </summary>
+    public static PostItem ContextPost(PostView post, bool lineAbove)
+    {
+        PostItem item = ToPostItem(post, replyingTo: string.Empty);
+        item.ThreadLineAbove = lineAbove;
+        item.ThreadLineBelow = true;
+        return item;
+    }
+
     public static PostItem ToPostItem(PostView post, string? repostedBy = null, string? replyingTo = null)
     {
         Post? record = post.Record;
@@ -48,6 +100,7 @@ public static class FeedMapper
             AuthorHandle = handle,
             AuthorDisplayName = DisplayNameOf(author),
             AvatarUri = author.Avatar,
+            AuthorLabels = LabelService.Instance.ForAccount(author),
             Text = text,
             Segments = FacetSegmenter.Segment(text, ToFacetInputs(record?.Facets)),
             CreatedAt = record?.CreatedAt ?? post.IndexedAt,
@@ -58,8 +111,12 @@ public static class FeedMapper
             LikeCount = post.LikeCount,
             RepostCount = post.RepostCount,
             ReplyCount = post.ReplyCount,
+            QuoteCount = post.QuoteCount,
             IsLiked = post.Viewer?.Like is not null,
             IsReposted = post.Viewer?.Repost is not null,
+            IsBookmarked = post.Viewer?.Bookmarked == true,
+            ThreadRootUri = PostMenuPolicy.ThreadRootUri(atUri, record?.Reply?.Root?.Uri?.ToString()),
+            IsThreadMuted = post.Viewer?.ThreadMuted == true,
             LikeUri = post.Viewer?.Like?.ToString(),
             RepostUri = post.Viewer?.Repost?.ToString()
         };
@@ -92,6 +149,105 @@ public static class FeedMapper
         DisplayName = string.IsNullOrWhiteSpace(profile.DisplayName) ? string.Empty : profile.DisplayName.Trim(),
         AvatarUri = profile.Avatar
     };
+
+    /// <summary>Projects a starter pack search hit onto a result row.</summary>
+    public static StarterPackItem ToStarterPackItem(idunno.Bluesky.Graph.StarterPackViewBasic pack)
+    {
+        string uri = pack.Uri.ToString();
+        string creator = pack.Creator.Handle?.ToString() ?? string.Empty;
+        string authority = pack.Creator.Did.ToString();
+        string rkey = uri[(uri.LastIndexOf('/') + 1)..];
+
+        return new StarterPackItem
+        {
+            Name = pack.Record.Name,
+            Description = pack.Record.Description?.Trim() ?? string.Empty,
+            CreatorHandle = creator,
+            CreatorAvatarUri = pack.Creator.Avatar,
+            AtUri = uri,
+            ListUri = pack.Record.List.ToString(),
+            MemberCount = Convert.ToInt32(pack.ListItemCount),
+            JoinedCount = Convert.ToInt32(pack.JoinedAllTimeCount),
+            WebUrl = $"https://bsky.app/starter-pack/{authority}/{rkey}"
+        };
+    }
+
+    public static ListKind ToListKind(idunno.Bluesky.Graph.ListPurpose purpose) => purpose switch
+    {
+        idunno.Bluesky.Graph.ListPurpose.CurateList => ListKind.Curate,
+        idunno.Bluesky.Graph.ListPurpose.ModList => ListKind.Moderation,
+        idunno.Bluesky.Graph.ListPurpose.ReferenceList => ListKind.Reference,
+        _ => ListKind.Unknown
+    };
+
+    public static idunno.Bluesky.Graph.ListPurpose ToListPurpose(ListKind kind) => kind switch
+    {
+        ListKind.Moderation => idunno.Bluesky.Graph.ListPurpose.ModList,
+        ListKind.Reference => idunno.Bluesky.Graph.ListPurpose.ReferenceList,
+        _ => idunno.Bluesky.Graph.ListPurpose.CurateList
+    };
+
+    /// <summary>Projects a list onto a row (a profile's Lists tab, the "Add to list" dialog).</summary>
+    public static ListItem ToListItem(idunno.Bluesky.Graph.ListView list) => new()
+    {
+        Uri = list.Uri.ToString(),
+        Name = list.Name,
+        Description = list.Description?.Trim() ?? string.Empty,
+        Kind = ToListKind(list.Purpose),
+        AvatarUri = list.Avatar,
+        MemberCount = list.ListItemCount ?? 0,
+        CreatorDid = list.Creator.Did.ToString(),
+        CreatorHandle = list.Creator.Handle?.ToString() ?? string.Empty,
+        IsMuted = list.Viewer?.Muted == true,
+        IsBlocked = list.Viewer?.Blocked is not null
+    };
+
+    /// <summary>Projects a feed generator onto a feed row (Explore suggestions, a profile's Feeds tab).</summary>
+    public static FeedSuggestionItem ToFeedSuggestionItem(GeneratorView feed)
+    {
+        string uri = feed.Uri.ToString();
+        string rkey = uri[(uri.LastIndexOf('/') + 1)..];
+        return new FeedSuggestionItem
+        {
+            AtUri = uri,
+            IsPinned = FeedsService.Instance.IsPinned(uri),
+            DisplayName = feed.DisplayName,
+            Description = feed.Description?.Trim() ?? string.Empty,
+            CreatorHandle = feed.Creator.Handle?.ToString() ?? string.Empty,
+            AvatarUri = feed.AvatarUri,
+            LikeCount = Convert.ToInt32(feed.LikeCount),
+            WebUrl = $"https://bsky.app/profile/{feed.Creator.Did}/feed/{rkey}"
+        };
+    }
+
+    /// <summary>A row for the blocked / muted screen; <paramref name="blocks"/> picks the button label.</summary>
+    public static ActorItem ToManagedActorItem(ProfileView profile, bool blocks) => new()
+    {
+        ManagedActionLabel = ManagedAccountsPolicy.ActionLabel(blocks),
+        Did = profile.Did.ToString(),
+        Handle = profile.Handle?.ToString() ?? string.Empty,
+        DisplayName = string.IsNullOrWhiteSpace(profile.DisplayName) ? string.Empty : profile.DisplayName.Trim(),
+        AvatarUri = profile.Avatar,
+        BlockUri = profile.Viewer?.Blocking?.ToString()
+    };
+
+    /// <summary>A row for the notification-bell list; <c>ManagedActionLabel</c> is "Turn off" and the subtitle names what is on.</summary>
+    public static ActorItem ToSubscribedActorItem(ProfileView profile)
+    {
+        ActivitySubscriptionLevel level = profile.Viewer?.ActivitySubscription is { } sub
+            ? ActivitySubscriptionPolicy.FromFlags(sub.Post, sub.Reply)
+            : ActivitySubscriptionLevel.Posts;
+
+        return new ActorItem
+        {
+            ManagedActionLabel = "Turn off",
+            ManagedDetail = ActivitySubscriptionPolicy.Label(level),
+            Did = profile.Did.ToString(),
+            Handle = profile.Handle?.ToString() ?? string.Empty,
+            DisplayName = string.IsNullOrWhiteSpace(profile.DisplayName) ? string.Empty : profile.DisplayName.Trim(),
+            AvatarUri = profile.Avatar
+        };
+    }
 
     public static IEnumerable<FacetInput> ToFacetInputs(IEnumerable<Facet>? facets)
     {
@@ -314,13 +470,7 @@ public static class FeedMapper
         if (thread.Thread is not ThreadViewPost main || main.Post is null)
             return rows;
 
-        List<PostView> ancestors = [];
-        PostViewBase? cursor = main.Parent;
-        while (cursor is ThreadViewPost parent && parent.Post is not null)
-        {
-            ancestors.Insert(0, parent.Post);
-            cursor = parent.Parent;
-        }
+        List<PostView> ancestors = AncestorsOf(main);
 
         string? previousHandle = null;
         foreach (PostView ancestor in ancestors)
@@ -333,6 +483,19 @@ public static class FeedMapper
 
         AddReplies(rows, main, main.Post.Author?.Handle?.ToString(), depth: 1, maxDepth);
         return rows;
+    }
+
+    /// <summary>The posts above a thread's main post, oldest first; stops at the first one that is gone.</summary>
+    public static List<PostView> AncestorsOf(ThreadViewPost main)
+    {
+        List<PostView> ancestors = [];
+        PostViewBase? cursor = main.Parent;
+        while (cursor is ThreadViewPost parent && parent.Post is not null)
+        {
+            ancestors.Insert(0, parent.Post);
+            cursor = parent.Parent;
+        }
+        return ancestors;
     }
 
     private static void AddReplies(List<ThreadRow> rows, ThreadViewPost parent, string? parentHandle, int depth, int maxDepth)
@@ -416,6 +579,7 @@ public static class FeedMapper
             case NotificationKind.Mention:
             case NotificationKind.Reply:
             case NotificationKind.Quote:
+            case NotificationKind.SubscribedPost:
                 // The notification *is* their post; its record has the text, and the hydrated
                 // view (if fetched) has counts and viewer state for the action buttons.
                 subjectAtUri = newest.Uri.ToString();

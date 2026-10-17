@@ -72,10 +72,12 @@ public sealed partial class PostPageViewModel : ObservableObject
         IsLoading = true;
         try
         {
+            await LabelService.Instance.EnsureLoadedAsync();
             AtProtoHttpResult<PostThread> result = await BlueskySessionService.Instance.Agent.GetPostThread(
                 new AtUri(atUri),
                 depth: ReplyDepth,
-                parentHeight: 10);
+                parentHeight: 10,
+                subscribedLabelers: LabelService.Instance.Subscribed);
 
             if (!result.Succeeded || result.Result is null)
             {

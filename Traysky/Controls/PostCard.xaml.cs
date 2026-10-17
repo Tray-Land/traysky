@@ -194,6 +194,7 @@ public sealed partial class PostCard : UserControl
     {
         PostCard card = (PostCard)d;
         card._textHasSelection = card._textHadSelection = false;
+        card.Visibility = Visibility.Visible; // undo a delete-collapse on a recycled container
         if (e.NewValue is PostItem post)
             RichTextBuilder.Populate(card.PostText, post.Segments);
         else
@@ -207,8 +208,30 @@ public sealed partial class PostCard : UserControl
         ? (Brush)Application.Current.Resources["SystemFillColorCriticalBrush"]
         : (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
 
+    /// <summary>Amber when any label on the account is an alert (adult content, spam...), grey otherwise.</summary>
+    public Brush LabelIconBrush(bool hasAlert) => hasAlert
+        ? (Brush)Application.Current.Resources["SystemFillColorCautionBrush"]
+        : (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+
+    /// <summary>Fills the flyout from the current post each time it opens, since the card is recycled between posts.</summary>
+    private void LabelsFlyout_Opening(object? sender, object e)
+    {
+        if (sender is Flyout { Content: StackPanel panel } && Post is not null)
+        {
+            foreach (UIElement child in panel.Children)
+            {
+                if (child is ItemsControl list)
+                    list.ItemsSource = Post.AuthorLabels;
+            }
+        }
+    }
+
     public Brush RepostBrush(bool reposted) => reposted
         ? (Brush)Application.Current.Resources["SystemFillColorSuccessBrush"]
+        : (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+
+    public Brush BookmarkBrush(bool bookmarked) => bookmarked
+        ? (Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"]
         : (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
 
     private void Reply_Click(object sender, RoutedEventArgs e)
@@ -226,6 +249,12 @@ public sealed partial class PostCard : UserControl
         NavigationService.Instance.Navigate(typeof(Pages.ComposePage));
     }
 
+    private void RepostMenu_Opening(object? sender, object e)
+    {
+        if (Post is not null)
+            RepostItem.Text = Post.IsReposted ? "Undo repost" : "Repost";
+    }
+
     private void Repost_Click(object sender, RoutedEventArgs e)
     {
         if (Post is not null)
@@ -236,6 +265,125 @@ public sealed partial class PostCard : UserControl
     {
         if (Post is not null)
             _ = PostInteractions.ToggleLikeAsync(Post);
+    }
+
+    private bool IsOwnPost => Post is not null
+        && string.Equals(Post.AuthorDid, BlueskySessionService.Instance.Did, StringComparison.Ordinal);
+
+    private static Visibility Show(bool visible) => visible ? Visibility.Visible : Visibility.Collapsed;
+
+    private void MoreMenu_Opening(object? sender, object e)
+    {
+        if (Post is null)
+            return;
+
+        PostMenuState menu = PostMenuPolicy.For(
+            Post.AuthorDid, BlueskySessionService.Instance.Did, BlueskySessionService.Instance.IsSignedIn, Post.IsThreadMuted);
+
+        Visibility moderation = Show(menu.ShowAccountModeration);
+        ModerationSeparator.Visibility = moderation;
+        MuteItem.Visibility = moderation;
+        BlockItem.Visibility = moderation;
+        ReportItem.Visibility = moderation;
+
+        DeleteItem.Visibility = Show(menu.ShowDelete);
+        InteractionItem.Visibility = Show(menu.ShowInteractionSettings);
+        MuteThreadItem.Visibility = Show(menu.ShowMuteThread);
+        DeleteSeparator.Visibility = Show(menu.ShowDelete || menu.ShowMuteThread);
+
+        MuteThreadItem.Text = menu.MuteThreadLabel;
+        MuteItem.Text = $"Mute @{Post.AuthorHandle}";
+        BlockItem.Text = $"Block @{Post.AuthorHandle}";
+    }
+
+    private async void MuteThread_Click(object sender, RoutedEventArgs e)
+    {
+        if (Post is not { } post || XamlRoot is null)
+            return;
+
+        XamlRoot root = XamlRoot;
+        bool wasMuted = post.IsThreadMuted;
+        if (!await PostInteractions.ToggleThreadMuteAsync(post))
+            await Helpers.ModerationDialogs.ShowMessageAsync(root, wasMuted ? "Couldn't unmute" : "Couldn't mute",
+                "The thread's mute setting didn't change. Try again in a moment.");
+    }
+
+    private async void InteractionSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (Post is not { } post || XamlRoot is null || !IsOwnPost)
+            return;
+
+        XamlRoot root = XamlRoot;
+        if (!await Helpers.GateDialogs.EditPostAsync(root, post))
+            await Helpers.ModerationDialogs.ShowMessageAsync(root, "Couldn't save", "The reply and quote settings didn't change. Try again in a moment.");
+    }
+
+    private async void DeletePost_Click(object sender, RoutedEventArgs e)
+    {
+        if (Post is not { } post || XamlRoot is null || !IsOwnPost)
+            return;
+
+        XamlRoot root = XamlRoot;
+        if (!await Helpers.ModerationDialogs.ConfirmDeletePostAsync(root))
+            return;
+
+        if (await PostInteractions.DeletePostAsync(post))
+        {
+            // Only hide if this card still shows the deleted post (containers get recycled).
+            if (ReferenceEquals(Post, post))
+                Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            await Helpers.ModerationDialogs.ShowMessageAsync(root, "Couldn't delete", "The post wasn't deleted. Try again in a moment.");
+        }
+    }
+
+    private async void MuteAuthor_Click(object sender, RoutedEventArgs e)
+    {
+        if (Post is null || XamlRoot is null)
+            return;
+
+        if (!await ModerationService.SetMutedAsync(Post.AuthorDid, muted: true))
+            await Helpers.ModerationDialogs.ShowMessageAsync(XamlRoot, "Couldn't mute", $"Muting @{Post.AuthorHandle} didn't go through. Try again in a moment.");
+    }
+
+    private async void BlockAuthor_Click(object sender, RoutedEventArgs e)
+    {
+        if (Post is null || XamlRoot is null)
+            return;
+
+        XamlRoot root = XamlRoot;
+        string handle = Post.AuthorHandle;
+        string did = Post.AuthorDid;
+        if (!await Helpers.ModerationDialogs.ConfirmBlockAsync(root, handle))
+            return;
+
+        if (await ModerationService.BlockAsync(did) is null)
+            await Helpers.ModerationDialogs.ShowMessageAsync(root, "Couldn't block", $"Blocking @{handle} didn't go through. Try again in a moment.");
+    }
+
+    private async void ReportPost_Click(object sender, RoutedEventArgs e)
+    {
+        if (Post is null || XamlRoot is null)
+            return;
+
+        XamlRoot root = XamlRoot;
+        var reference = Post.Reference;
+        var answer = await Helpers.ModerationDialogs.AskReportAsync(root, "post");
+        if (answer is not { } report)
+            return;
+
+        bool sent = await ModerationService.ReportPostAsync(reference, report.Reason, report.Details);
+        await Helpers.ModerationDialogs.ShowMessageAsync(root,
+            sent ? "Report sent" : "Couldn't send report",
+            sent ? "Thanks. Bluesky's moderators will take a look." : "The report didn't go through. Try again in a moment.");
+    }
+
+    private void Bookmark_Click(object sender, RoutedEventArgs e)
+    {
+        if (Post is not null)
+            _ = PostInteractions.ToggleBookmarkAsync(Post);
     }
 
     private void CopyLink_Click(object sender, RoutedEventArgs e) => CopyToClipboard(Post?.WebUrl);

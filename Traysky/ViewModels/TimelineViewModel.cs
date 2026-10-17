@@ -60,7 +60,14 @@ public sealed partial class TimelineViewModel : ObservableObject
         await RefreshAsync();
     }
 
-    public ObservableCollection<PostItem> Posts { get; } = [];
+    /// <summary>
+    /// What the list shows, top to bottom: <see cref="PostItem"/>s (a followed user's post, or the
+    /// post it replies to when reply context is on) and <see cref="ThreadGapItem"/> "Load more" rows.
+    /// </summary>
+    public ObservableCollection<object> Rows { get; } = [];
+
+    /// <summary>Whether the rows now loaded were built with reply context; a settings change then needs a reload.</summary>
+    private bool _builtWithContext = true;
 
     /// <summary>The feed tab currently shown, or null for the home timeline.</summary>
     public FeedTabItem? CurrentFeed => _currentFeed;
@@ -100,10 +107,15 @@ public sealed partial class TimelineViewModel : ObservableObject
         if (!BlueskySessionService.Instance.IsSignedIn)
             return Task.CompletedTask;
 
-        if (Posts.Count > 0 && DateTimeOffset.UtcNow - _loadedAtUtc < StaleAfter)
+        if (Rows.Count > 0
+            && DateTimeOffset.UtcNow - _loadedAtUtc < StaleAfter
+            && _builtWithContext == SettingsService.ShowReplyContext)
         {
-            foreach (PostItem p in Posts)
-                p.RefreshTimeAgo();
+            foreach (object row in Rows)
+            {
+                if (row is PostItem p)
+                    p.RefreshTimeAgo();
+            }
             return Task.CompletedTask;
         }
 
@@ -119,16 +131,19 @@ public sealed partial class TimelineViewModel : ObservableObject
         if (!await _gate.WaitAsync(0))
             return;
 
-        IsLoading = Posts.Count == 0;
+        IsLoading = Rows.Count == 0;
         Error = null;
 
         try
         {
+            bool includeContext = SettingsService.ShowReplyContext;
+
             if (PreviewMode.IsEnabled)
             {
-                Posts.Clear();
-                foreach (PostItem p in PreviewMode.SamplePosts())
-                    Posts.Add(p);
+                Rows.Clear();
+                foreach (object row in PreviewMode.SampleTimelineRows(includeContext))
+                    Rows.Add(row);
+                _builtWithContext = includeContext;
                 _loadedAtUtc = DateTimeOffset.UtcNow;
                 IsEmpty = false;
                 return;
@@ -136,28 +151,24 @@ public sealed partial class TimelineViewModel : ObservableObject
 
             FeedPage page = await FetchPageAsync(cursor: null);
 
-            if (!page.Succeeded || page.Posts is null)
+            if (!page.Succeeded || !page.HasContent)
             {
                 Error = Describe(page.StatusCode, page.ErrorMessage);
                 LogService.Warn("Timeline", $"Refresh failed: {(int)page.StatusCode}");
                 return;
             }
 
-            List<PostItem> fresh = [];
-            foreach (FeedViewPost fp in page.Posts)
-            {
-                if (fp.Post is null)
-                    continue;
-                fresh.Add(FeedMapper.ToPostItem(fp));
-            }
+            List<object> fresh = [];
+            AppendPage(page, fresh, [], includeContext);
 
-            Posts.Clear();
-            foreach (PostItem p in fresh)
-                Posts.Add(p);
+            Rows.Clear();
+            foreach (object row in fresh)
+                Rows.Add(row);
 
+            _builtWithContext = includeContext;
             _cursor = page.Cursor;
             _loadedAtUtc = DateTimeOffset.UtcNow;
-            IsEmpty = Posts.Count == 0;
+            IsEmpty = Rows.Count == 0;
         }
         catch (Exception ex)
         {
@@ -184,25 +195,23 @@ public sealed partial class TimelineViewModel : ObservableObject
         try
         {
             FeedPage page = await FetchPageAsync(_cursor);
-            if (!page.Succeeded || page.Posts is null)
+            if (!page.Succeeded || !page.HasContent)
             {
                 LogService.Warn("Timeline", $"Load more failed: {(int)page.StatusCode}");
                 return;
             }
 
             HashSet<string> seen = [];
-            foreach (PostItem p in Posts)
-                seen.Add(p.AtUri);
-
-            foreach (FeedViewPost fp in page.Posts)
+            foreach (object row in Rows)
             {
-                if (fp.Post is null)
-                    continue;
-                PostItem item = FeedMapper.ToPostItem(fp);
-                // Reposts make the same post appear twice across page boundaries.
-                if (seen.Add(item.AtUri))
-                    Posts.Add(item);
+                if (row is PostItem p)
+                    seen.Add(p.AtUri);
             }
+
+            List<object> more = [];
+            AppendPage(page, more, seen, _builtWithContext);
+            foreach (object row in more)
+                Rows.Add(row);
 
             _cursor = page.Cursor;
         }
@@ -235,9 +244,113 @@ public sealed partial class TimelineViewModel : ObservableObject
     [RelayCommand]
     private void OpenProfile(PostItem post) => Pages.ProfilePage.Open(post.AuthorDid.Length > 0 ? post.AuthorDid : post.AuthorHandle);
 
+    /// <summary>
+    /// Expands a "Load more" gap: up to <see cref="ReplyContextPolicy.MaxInlineExpansion"/> hidden
+    /// posts are put in where the gap is; a longer (or unreachable) chain opens the full thread
+    /// page for the reply instead.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExpandGap(ThreadGapItem gap)
+    {
+        if (gap.IsLoading)
+            return;
+
+        gap.IsLoading = true;
+        try
+        {
+            List<PostView> hidden = [];
+            IReadOnlyList<string>? missing = null;
+
+            if (!PreviewMode.IsEnabled)
+            {
+                AtProtoHttpResult<PostThread> result = await BlueskySessionService.Instance.Agent.GetPostThread(
+                    new AtUri(gap.ParentUri),
+                    depth: 0,
+                    parentHeight: ReplyContextPolicy.ExpansionParentHeight,
+                    subscribedLabelers: LabelService.Instance.Subscribed);
+
+                if (result.Succeeded && result.Result?.Thread is ThreadViewPost thread && thread.Post is not null)
+                {
+                    List<PostView> chain = FeedMapper.AncestorsOf(thread);
+                    chain.Add(thread.Post);
+
+                    missing = ReplyContextPolicy.MissingBetween(chain.ConvertAll(p => p.Uri.ToString()), gap.RootUri, gap.ParentUri);
+                    if (missing is not null)
+                    {
+                        HashSet<string> wanted = [.. missing];
+                        hidden = chain.FindAll(p => wanted.Contains(p.Uri.ToString()));
+                    }
+                }
+                else
+                {
+                    LogService.Warn("Timeline", $"Expanding a thread gap failed: {(int)result.StatusCode}");
+                }
+            }
+
+            if (!ReplyContextPolicy.ExpandsInPlace(missing))
+            {
+                Pages.PostPage.Open(gap.Reply);
+                return;
+            }
+
+            int index = Rows.IndexOf(gap);
+            if (index < 0)
+                return; // the list was refreshed while the request was out
+
+            Rows.RemoveAt(index);
+            foreach (PostView post in hidden)
+                Rows.Insert(index++, FeedMapper.ContextPost(post, lineAbove: true));
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("Timeline", "Expanding a thread gap threw", ex);
+        }
+        finally
+        {
+            gap.IsLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Turns feed entries into rows. An entry whose post is already in the list (a repost across a
+    /// page boundary, or a post already shown as context for a reply) is skipped, and what an
+    /// entry adds is recorded in <paramref name="seen"/>.
+    /// </summary>
+    private static void AppendPage(FeedPage page, List<object> rows, HashSet<string> seen, bool includeContext)
+    {
+        if (page.Posts is not null)
+            AppendEntries(page.Posts, rows, seen, includeContext);
+
+        // Search hits are bare posts: no repost reason or reply context to build rows from.
+        if (page.Hits is not null)
+        {
+            foreach (PostView hit in page.Hits)
+            {
+                if (seen.Add(hit.Uri.ToString()))
+                    rows.Add(FeedMapper.ToPostItem(hit));
+            }
+        }
+    }
+
+    private static void AppendEntries(IEnumerable<FeedViewPost> entries, List<object> rows, HashSet<string> seen, bool includeContext)
+    {
+        foreach (FeedViewPost fp in entries)
+        {
+            if (fp.Post is null || seen.Contains(fp.Post.Uri.ToString()))
+                continue;
+
+            foreach (object row in FeedMapper.ToTimelineRows(fp, includeContext))
+            {
+                if (row is PostItem post)
+                    seen.Add(post.AtUri);
+                rows.Add(row);
+            }
+        }
+    }
+
     private void Clear()
     {
-        Posts.Clear();
+        Rows.Clear();
         _cursor = null;
         _loadedAtUtc = DateTimeOffset.MinValue;
         Error = null;
@@ -246,24 +359,38 @@ public sealed partial class TimelineViewModel : ObservableObject
 
     /// <summary>Fetch results, flattened to one shape regardless of which endpoint served the currently
     /// selected feed - the timeline, a feed generator's feed, or a list's feed all page the same way.</summary>
-    private readonly record struct FeedPage(bool Succeeded, IEnumerable<FeedViewPost>? Posts, string? Cursor, System.Net.HttpStatusCode StatusCode, string? ErrorMessage);
+    private readonly record struct FeedPage(bool Succeeded, IEnumerable<FeedViewPost>? Posts, string? Cursor, System.Net.HttpStatusCode StatusCode, string? ErrorMessage, IEnumerable<PostView>? Hits = null)
+    {
+        /// <summary>True when the fetch produced something to show: feed entries, or search hits for a hashtag tab.</summary>
+        public bool HasContent => Posts is not null || Hits is not null;
+    }
 
     private async Task<FeedPage> FetchPageAsync(string? cursor)
     {
         BlueskyAgent agent = BlueskySessionService.Instance.Agent;
 
+        // Labels only come back for the labelers a request names.
+        await LabelService.Instance.EnsureLoadedAsync();
+        IReadOnlyList<Did>? labelers = LabelService.Instance.Subscribed;
+
         if (_currentFeed is null || _currentFeed.Kind == FeedTabKind.Timeline)
         {
-            AtProtoHttpResult<Timeline> result = await agent.GetTimeline(limit: PageSize, cursor: cursor);
+            AtProtoHttpResult<Timeline> result = await agent.GetTimeline(limit: PageSize, cursor: cursor, subscribedLabelers: labelers);
             return new FeedPage(result.Succeeded, result.Result, result.Result?.Cursor, result.StatusCode, result.AtErrorDetail?.Message);
+        }
+
+        if (_currentFeed.Kind == FeedTabKind.Hashtag && _currentFeed.Tag is { } tag)
+        {
+            AtProtoHttpResult<SearchResults> hits = await agent.SearchPosts("#" + tag, searchOrder: SearchOrder.Latest, limit: PageSize, cursor: cursor, subscribedLabelers: labelers);
+            return new FeedPage(hits.Succeeded, null, hits.Result?.Cursor, hits.StatusCode, hits.AtErrorDetail?.Message, hits.Result);
         }
 
         if (_currentFeed.Uri is not AtUri feedUri)
             return new FeedPage(false, null, null, 0, "That feed has no address.");
 
         AtProtoHttpResult<PagedViewReadOnlyCollection<FeedViewPost>> pageResult = _currentFeed.Kind == FeedTabKind.List
-            ? await agent.GetListFeed(feedUri, limit: PageSize, cursor: cursor)
-            : await agent.GetFeed(feedUri, limit: PageSize, cursor: cursor);
+            ? await agent.GetListFeed(feedUri, limit: PageSize, cursor: cursor, subscribedLabelers: labelers)
+            : await agent.GetFeed(feedUri, limit: PageSize, cursor: cursor, subscribedLabelers: labelers);
 
         return new FeedPage(pageResult.Succeeded, pageResult.Result, pageResult.Result?.Cursor, pageResult.StatusCode, pageResult.AtErrorDetail?.Message);
     }

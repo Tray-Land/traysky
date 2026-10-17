@@ -8,6 +8,7 @@
     xmlns:helpers="using:Traysky.Helpers"
     xmlns:local="using:Traysky.Controls"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:services="using:Traysky.Services"
     mc:Ignorable="d">
 
     <Grid
@@ -48,18 +49,42 @@
             </TextBlock>
         </StackPanel>
 
-        <PersonPicture
-            x:Name="Avatar"
+        <!--  Avatar column. In the timeline a reply is joined to the post it replies to by a line
+              down from one avatar to the next: LineAbove runs up through the card's top padding,
+              LineBelow down through its bottom padding, so the line is unbroken across cards.  -->
+        <Grid
             Grid.Row="1"
-            Grid.RowSpan="4"
-            Grid.Column="0"
-            Width="{StaticResource AvatarSize}"
-            Height="{StaticResource AvatarSize}"
-            VerticalAlignment="Top"
-            DisplayName="{x:Bind Post.AuthorDisplayName, Mode=OneWay}"
-            ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(Post.AvatarUri), Mode=OneWay}"
-            Tapped="Avatar_Tapped"
-            ToolTipService.ToolTip="View profile" />
+            Grid.RowSpan="6"
+            Grid.Column="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Rectangle
+                Width="2"
+                Height="10"
+                Margin="0,-10,0,0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                Fill="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                Visibility="{x:Bind Post.ThreadLineAbove, Mode=OneWay}" />
+            <PersonPicture
+                x:Name="Avatar"
+                Width="{StaticResource AvatarSize}"
+                Height="{StaticResource AvatarSize}"
+                VerticalAlignment="Top"
+                DisplayName="{x:Bind Post.AuthorDisplayName, Mode=OneWay}"
+                ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(Post.AvatarUri), Mode=OneWay}"
+                Tapped="Avatar_Tapped"
+                ToolTipService.ToolTip="View profile" />
+            <Rectangle
+                Grid.Row="1"
+                Width="2"
+                Margin="0,4,0,-4"
+                HorizontalAlignment="Center"
+                Fill="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                Visibility="{x:Bind Post.ThreadLineBelow, Mode=OneWay}" />
+        </Grid>
 
         <!--  Name, handle, time  -->
         <Grid
@@ -67,6 +92,7 @@
             Grid.Column="1"
             ColumnSpacing="6">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -78,14 +104,62 @@
                 FontWeight="SemiBold"
                 Text="{x:Bind Post.AuthorDisplayName, Mode=OneWay}"
                 TextTrimming="CharacterEllipsis" />
-            <TextBlock
+
+            <!--  Community labels on the author: click for the full list, without leaving the feed.
+                  x:Load, since almost no author has any and a Button with a Flyout is not free.  -->
+            <Button
+                x:Name="LabelsButton"
                 Grid.Column="1"
+                Margin="-4,0,-2,0"
+                Padding="4,2"
+                VerticalAlignment="Center"
+                x:Load="{x:Bind Post.HasAuthorLabels, Mode=OneWay, FallbackValue=False}"
+                Background="Transparent"
+                BorderThickness="0"
+                ToolTipService.ToolTip="{x:Bind Post.AuthorLabelsToolTip, Mode=OneWay}">
+                <FontIcon
+                    FontSize="12"
+                    Foreground="{x:Bind LabelIconBrush(Post.HasAlertLabel), Mode=OneWay}"
+                    Glyph="&#xE8EC;" />
+                <Button.Flyout>
+                    <Flyout Opening="LabelsFlyout_Opening" Placement="BottomEdgeAlignedLeft">
+                        <StackPanel MaxWidth="300" Spacing="8">
+                            <TextBlock FontWeight="SemiBold" Text="Labels on this account" />
+                            <ItemsControl>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="services:LabelDisplay">
+                                        <StackPanel Margin="0,0,0,8" Spacing="2">
+                                            <TextBlock
+                                                FontWeight="SemiBold"
+                                                Text="{x:Bind Name}"
+                                                TextWrapping="Wrap" />
+                                            <TextBlock
+                                                Style="{StaticResource SecondaryTextStyle}"
+                                                Text="{x:Bind Description}"
+                                                TextWrapping="Wrap"
+                                                Visibility="{x:Bind HasDescription}" />
+                                            <TextBlock
+                                                FontSize="11"
+                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                Text="{x:Bind SourceLine}"
+                                                TextWrapping="Wrap"
+                                                Visibility="{x:Bind HasSourceLine}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Flyout>
+                </Button.Flyout>
+            </Button>
+            <TextBlock
+                Grid.Column="2"
                 VerticalAlignment="Center"
                 Style="{StaticResource SecondaryTextStyle}"
                 Text="{x:Bind Post.HandleDisplay, Mode=OneWay}"
                 TextTrimming="CharacterEllipsis" />
             <TextBlock
-                Grid.Column="2"
+                Grid.Column="3"
                 VerticalAlignment="Center"
                 Style="{StaticResource SecondaryTextStyle}"
                 Text="{x:Bind Post.TimeAgo, Mode=OneWay}"
@@ -137,10 +211,7 @@
                         <TextBlock Text="{x:Bind Post.ReplyCountDisplay, Mode=OneWay}" />
                     </StackPanel>
                 </Button>
-                <Button
-                    Click="Repost_Click"
-                    Style="{StaticResource PostActionButtonStyle}"
-                    ToolTipService.ToolTip="Repost">
+                <Button Style="{StaticResource PostActionButtonStyle}" ToolTipService.ToolTip="Repost or quote">
                     <StackPanel Orientation="Horizontal" Spacing="5">
                         <FontIcon
                             FontSize="14"
@@ -148,6 +219,20 @@
                             Glyph="&#xE8EE;" />
                         <TextBlock Foreground="{x:Bind RepostBrush(Post.IsReposted), Mode=OneWay}" Text="{x:Bind Post.RepostCountDisplay, Mode=OneWay}" />
                     </StackPanel>
+                    <Button.Flyout>
+                        <MenuFlyout Opening="RepostMenu_Opening" Placement="BottomEdgeAlignedLeft">
+                            <MenuFlyoutItem x:Name="RepostItem" Click="Repost_Click" Text="Repost">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE8EE;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem Click="Quote_Click" Text="Quote post">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE9B2;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                        </MenuFlyout>
+                    </Button.Flyout>
                 </Button>
                 <Button
                     Click="Like_Click"
@@ -171,21 +256,30 @@
                 <Button
                     Click="Engagement_Click"
                     Style="{StaticResource PostActionButtonStyle}"
-                    ToolTipService.ToolTip="Likes and reposts"
+                    ToolTipService.ToolTip="Likes, reposts and quotes"
                     Visibility="{x:Bind EngagementVisibility(IsOpenable), Mode=OneWay}">
                     <FontIcon FontSize="14" Glyph="&#xE946;" />
+                </Button>
+                <Button
+                    Click="Bookmark_Click"
+                    Style="{StaticResource PostActionButtonStyle}"
+                    ToolTipService.ToolTip="{x:Bind Post.BookmarkLabel, Mode=OneWay}">
+                    <!--  A Path, not a PathIcon: Stretch=Uniform drops the data's ~2px left offset, so the shape is centered and unclipped in its 10 x 14 slot.  -->
+                    <Path
+                        Width="10"
+                        Height="14"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Data="F1 M3.116,15.862 C2.901,16.023 2.679,16.043 2.450,15.922 C2.222,15.801 2.107,15.619 2.107,15.377 L2.107,2.745 C2.107,1.991 2.376,1.345 2.915,0.807 C3.453,0.269 4.098,0.000 4.852,0.000 L11.148,0.000 C11.902,0.000 12.547,0.269 13.085,0.807 C13.624,1.345 13.893,1.991 13.893,2.745 L13.893,15.377 C13.893,15.619 13.778,15.801 13.550,15.922 C13.321,16.043 13.099,16.023 12.884,15.862 L8.000,12.350 Z M12.641,2.745 C12.641,2.341 12.493,1.998 12.197,1.715 C11.902,1.433 11.552,1.292 11.148,1.292 L4.852,1.292 C4.448,1.292 4.098,1.433 3.803,1.715 C3.507,1.998 3.359,2.341 3.359,2.745 L3.359,14.126 L7.637,11.059 C7.744,10.978 7.865,10.938 8.000,10.938 C8.135,10.938 8.256,10.978 8.363,11.059 L12.641,14.126 Z"
+                        Fill="{x:Bind BookmarkBrush(Post.IsBookmarked), Mode=OneWay}"
+                        Stretch="Uniform" />
                 </Button>
                 <Button
                     Style="{StaticResource PostActionButtonStyle}"
                     ToolTipService.ToolTip="More">
                     <FontIcon FontSize="14" Glyph="&#xE712;" />
                     <Button.Flyout>
-                        <MenuFlyout Placement="BottomEdgeAlignedRight">
-                            <MenuFlyoutItem Click="Quote_Click" Text="Quote post">
-                                <MenuFlyoutItem.Icon>
-                                    <FontIcon Glyph="&#xE9B2;" />
-                                </MenuFlyoutItem.Icon>
-                            </MenuFlyoutItem>
+                        <MenuFlyout Opening="MoreMenu_Opening" Placement="BottomEdgeAlignedRight">
                             <MenuFlyoutItem Click="CopyLink_Click" Text="Copy link">
                                 <MenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE71B;" />
@@ -205,6 +299,56 @@
                             <MenuFlyoutItem Click="OpenProfile_Click" Text="View profile">
                                 <MenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE77B;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutSeparator x:Name="DeleteSeparator" />
+                            <MenuFlyoutItem
+                                x:Name="MuteThreadItem"
+                                Click="MuteThread_Click"
+                                Text="Mute thread">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE74F;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem
+                                x:Name="InteractionItem"
+                                Click="InteractionSettings_Click"
+                                Text="Reply and quote settings…">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE72E;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem
+                                x:Name="DeleteItem"
+                                Click="DeletePost_Click"
+                                Text="Delete post">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE74D;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutSeparator x:Name="ModerationSeparator" />
+                            <MenuFlyoutItem
+                                x:Name="MuteItem"
+                                Click="MuteAuthor_Click"
+                                Text="Mute account">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE74F;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem
+                                x:Name="BlockItem"
+                                Click="BlockAuthor_Click"
+                                Text="Block account">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE733;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem
+                                x:Name="ReportItem"
+                                Click="ReportPost_Click"
+                                Text="Report post">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE7C1;" />
                                 </MenuFlyoutItem.Icon>
                             </MenuFlyoutItem>
                         </MenuFlyout>

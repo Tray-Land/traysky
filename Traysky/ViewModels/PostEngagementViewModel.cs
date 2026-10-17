@@ -6,6 +6,7 @@ using idunno.Bluesky.Actor;
 using idunno.Bluesky.Feed;
 using System;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Traysky.Services;
@@ -14,8 +15,8 @@ using Traysky.ViewModels.Items;
 namespace Traysky.ViewModels;
 
 /// <summary>
-/// Who liked and who reposted one post. Both lists are fetched when the page opens and page
-/// in independently as each is scrolled.
+/// Who liked and who reposted one post, and the posts quoting it. All three lists are fetched
+/// when the page opens and page in independently as each is scrolled.
 /// </summary>
 public sealed partial class PostEngagementViewModel : ObservableObject
 {
@@ -23,12 +24,15 @@ public sealed partial class PostEngagementViewModel : ObservableObject
 
     private readonly SemaphoreSlim _likesGate = new(1, 1);
     private readonly SemaphoreSlim _repostsGate = new(1, 1);
+    private readonly SemaphoreSlim _quotesGate = new(1, 1);
     private AtUri? _uri;
     private string? _likesCursor;
     private string? _repostsCursor;
+    private string? _quotesCursor;
 
     public ObservableCollection<ActorItem> Likes { get; } = [];
     public ObservableCollection<ActorItem> Reposts { get; } = [];
+    public ObservableCollection<PostItem> Quotes { get; } = [];
 
     [ObservableProperty]
     public partial PostItem? Post { get; private set; }
@@ -45,6 +49,10 @@ public sealed partial class PostEngagementViewModel : ObservableObject
     public bool HasMoreLikes => !string.IsNullOrEmpty(_likesCursor);
     public bool HasMoreReposts => !string.IsNullOrEmpty(_repostsCursor);
 
+    public bool HasMoreQuotes => !string.IsNullOrEmpty(_quotesCursor);
+
+    public string QuotesHeader => Post is { QuoteCount: > 0 } p ? $"Quotes ({p.QuoteCount})" : "Quotes";
+
     public string LikesHeader => Post is { LikeCount: > 0 } p ? $"Likes ({p.LikeCount})" : "Likes";
     public string RepostsHeader => Post is { RepostCount: > 0 } p ? $"Reposts ({p.RepostCount})" : "Reposts";
 
@@ -53,14 +61,24 @@ public sealed partial class PostEngagementViewModel : ObservableObject
         Post = post;
         OnPropertyChanged(nameof(LikesHeader));
         OnPropertyChanged(nameof(RepostsHeader));
+        OnPropertyChanged(nameof(QuotesHeader));
 
         Error = null;
         Likes.Clear();
         Reposts.Clear();
+        Quotes.Clear();
         _likesCursor = null;
         _repostsCursor = null;
+        _quotesCursor = null;
 
-        if (!BlueskySessionService.Instance.IsSignedIn || PreviewMode.IsEnabled || string.IsNullOrEmpty(post.AtUri))
+        if (PreviewMode.IsEnabled)
+        {
+            foreach (PostItem sample in PreviewMode.SamplePosts().Take(2))
+                Quotes.Add(sample);
+            return;
+        }
+
+        if (!BlueskySessionService.Instance.IsSignedIn || string.IsNullOrEmpty(post.AtUri))
             return;
 
         _uri = new AtUri(post.AtUri);
@@ -68,7 +86,7 @@ public sealed partial class PostEngagementViewModel : ObservableObject
         IsLoading = true;
         try
         {
-            await Task.WhenAll(LoadLikesAsync(reset: true), LoadRepostsAsync(reset: true));
+            await Task.WhenAll(LoadLikesAsync(reset: true), LoadRepostsAsync(reset: true), LoadQuotesAsync(reset: true));
         }
         finally
         {
@@ -79,6 +97,46 @@ public sealed partial class PostEngagementViewModel : ObservableObject
     public Task LoadMoreLikesAsync() => HasMoreLikes ? LoadLikesAsync(reset: false) : Task.CompletedTask;
 
     public Task LoadMoreRepostsAsync() => HasMoreReposts ? LoadRepostsAsync(reset: false) : Task.CompletedTask;
+
+    public Task LoadMoreQuotesAsync() => HasMoreQuotes ? LoadQuotesAsync(reset: false) : Task.CompletedTask;
+
+    private async Task LoadQuotesAsync(bool reset)
+    {
+        if (_uri is null || !await _quotesGate.WaitAsync(0))
+            return;
+
+        try
+        {
+            AtProtoHttpResult<QuotesCollection> result = await BlueskySessionService.Instance.Agent.GetQuotes(
+                _uri,
+                limit: PageSize,
+                cursor: reset ? null : _quotesCursor);
+
+            if (!result.Succeeded || result.Result is null)
+            {
+                LogService.Warn("Engagement", $"GetQuotes failed: {(int)result.StatusCode} {result.AtErrorDetail?.Error}");
+                Error = LoadError(result.StatusCode);
+                return;
+            }
+
+            if (reset)
+                Quotes.Clear();
+
+            foreach (PostView quote in result.Result)
+                Quotes.Add(FeedMapper.ToPostItem(quote));
+
+            _quotesCursor = result.Result.Cursor;
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("Engagement", $"GetQuotes threw: {ex.Message}");
+            Error = "Couldn't load quotes of this post.";
+        }
+        finally
+        {
+            _quotesGate.Release();
+        }
+    }
 
     private async Task LoadLikesAsync(bool reset)
     {
@@ -161,7 +219,7 @@ public sealed partial class PostEngagementViewModel : ObservableObject
 
     private static string LoadError(System.Net.HttpStatusCode status) => status == 0
         ? "Couldn't reach Bluesky. Check your connection."
-        : "Couldn't load likes and reposts.";
+        : "Couldn't load likes, reposts and quotes.";
 
     [RelayCommand]
     private Task Retry() => Post is null ? Task.CompletedTask : LoadAsync(Post);
