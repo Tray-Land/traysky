@@ -38,7 +38,8 @@ public sealed record GroupJoinPreview(
     bool IsDisabled,
     bool IsInvalid,
     bool RequestPending,
-    ConversationItem? AlreadyIn);
+    ConversationItem? AlreadyIn,
+    string? ConversationId = null);
 
 /// <summary>
 /// Group chat calls: create, rename, add and remove people, the join link and its requests, and
@@ -278,7 +279,8 @@ public static class GroupChatService
                             false,
                             false,
                             (object?)p.Viewer is idunno.Bluesky.Chat.Group.JoinLinkViewerState { RequestedAt: not null },
-                            p.Conversation is { } view ? ChatMapper.ToConversationItem(view, session.Did) : null);
+                            p.Conversation is { } view ? ChatMapper.ToConversationItem(view, session.Did) : null,
+                            p.ConversationId);
 
                     case idunno.Bluesky.Chat.Group.DisabledJoinLinkPreviewView:
                         return new GroupJoinPreview(code, string.Empty, string.Empty, 0, 0, false, false, true, false, false, null);
@@ -314,6 +316,14 @@ public static class GroupChatService
 
         return (await PreviewAsync(code), null);
     }
+
+    /// <summary>Cancels the account's own pending request to join a group. Null when it worked, else a sentence for the user.</summary>
+    public static Task<string?> WithdrawJoinRequestAsync(string conversationId) =>
+        RunAsync("WithdrawJoinGroupRequest", "Couldn't cancel the request.", async agent =>
+        {
+            var r = await agent.WithdrawJoinGroupRequest(conversationId);
+            return (r.Succeeded, r.StatusCode, r.AtErrorDetail);
+        });
 
     // ---- Plumbing ------------------------------------------------------------------------
 

@@ -33,9 +33,72 @@ public sealed partial class MessagesViewModel : ObservableObject
     private MessagesViewModel()
     {
         BlueskySessionService.Instance.SignedOut += (_, _) => Clear();
+        ChatService.Instance.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ChatService.UnreadCount))
+                OnPropertyChanged(nameof(CanMarkAllRead));
+        };
+        Items.CollectionChanged += (_, _) => RefreshDerived();
     }
 
     public ObservableCollection<ConversationItem> Items { get; } = [];
+
+    /// <summary>The main list, or just the message requests (loaded through their own endpoint).</summary>
+    public ChatListMode Mode { get; private set; } = ChatListMode.All;
+
+    public bool IsRequestsMode => Mode == ChatListMode.Requests;
+
+    public string EmptyText => ChatReadPolicy.EmptyText(Mode);
+
+    /// <summary>The Requests tab's label, with how many requests are known.</summary>
+    public string RequestsLabel => ChatReadPolicy.RequestsLabel(
+        IsRequestsMode ? Items.Count : Items.Count(i => i.IsRequest), IsRequestsMode && HasMore);
+
+    public bool CanMarkAllRead => ChatReadPolicy.CanMarkAllRead(
+        Mode, ChatService.Instance.UnreadCount, Items.Count(i => i.IsUnread && !i.IsRequest && !i.IsMuted));
+
+    private void RefreshDerived()
+    {
+        OnPropertyChanged(nameof(CanMarkAllRead));
+        OnPropertyChanged(nameof(RequestsLabel));
+    }
+
+    /// <summary>Switches between the main list and the requests, reloading from the top.</summary>
+    public Task SetModeAsync(ChatListMode mode)
+    {
+        if (Mode == mode)
+            return Task.CompletedTask;
+
+        Mode = mode;
+        _cursor = null;
+        Items.Clear();
+        IsEmpty = false;
+        Error = null;
+        OnPropertyChanged(nameof(Mode));
+        OnPropertyChanged(nameof(IsRequestsMode));
+        OnPropertyChanged(nameof(EmptyText));
+        RefreshDerived();
+        return RefreshAsync();
+    }
+
+    private sealed record Page(bool Ok, System.Net.HttpStatusCode Status, AtErrorDetail? Detail, IReadOnlyList<ConversationView> Views, string? Cursor);
+
+    /// <summary>One page of the current list. Requests come from their own endpoint, which also types its rows more loosely.</summary>
+    private async Task<Page> FetchAsync(BlueskySessionService session, string? cursor)
+    {
+        if (Mode == ChatListMode.Requests)
+        {
+            var requests = await session.Agent.ListConversationRequests(PageSize, cursor);
+            return requests.Succeeded && requests.Result is { } r
+                ? new Page(true, requests.StatusCode, requests.AtErrorDetail, r.OfType<ConversationView>().ToList(), r.Cursor)
+                : new Page(false, requests.StatusCode, requests.AtErrorDetail, [], null);
+        }
+
+        var all = await session.Agent.ListConversations(limit: PageSize, cursor: cursor);
+        return all.Succeeded && all.Result is { } c
+            ? new Page(true, all.StatusCode, all.AtErrorDetail, c.ToList(), c.Cursor)
+            : new Page(false, all.StatusCode, all.AtErrorDetail, [], null);
+    }
 
     [ObservableProperty]
     public partial bool IsLoading { get; private set; }
@@ -79,28 +142,33 @@ public sealed partial class MessagesViewModel : ObservableObject
         {
             if (PreviewMode.IsEnabled)
             {
-                Replace(PreviewMode.SampleConversations());
+                Replace(PreviewMode.SampleConversations().Where(c => Mode == ChatListMode.All || c.IsRequest));
                 _cursor = null;
                 return;
             }
 
             await session.EnsureAuthenticatedAsync();
 
-            AtProtoHttpResult<Conversations> result = await session.Agent.ListConversations(limit: PageSize);
-            if (!result.Succeeded || result.Result is null)
+            ChatListMode requested = Mode;
+            Page result = await FetchAsync(session, null);
+            if (requested != Mode)
+                return;
+
+            if (!result.Ok)
             {
-                Error = result.StatusCode switch
+                Error = result.Status switch
                 {
                     System.Net.HttpStatusCode.Unauthorized => "Your session expired. Sign in again.",
                     0 => "Couldn't reach Bluesky. Check your connection.",
                     _ => "Couldn't load your messages."
                 };
-                LogService.Warn("Chat", $"Conversation list failed: {(int)result.StatusCode} {result.AtErrorDetail?.Error}");
+                LogService.Warn("Chat", $"Conversation list failed: {(int)result.Status} {result.Detail?.Error}");
                 return;
             }
 
-            Replace(result.Result.Select(c => ChatMapper.ToConversationItem(c, session.Did)));
-            _cursor = result.Result.Cursor;
+            Replace(result.Views.Select(c => ChatMapper.ToConversationItem(c, session.Did)));
+            _cursor = result.Cursor;
+            RefreshDerived();
         }
         catch (Exception ex)
         {
@@ -127,17 +195,19 @@ public sealed partial class MessagesViewModel : ObservableObject
         IsLoadingMore = true;
         try
         {
-            AtProtoHttpResult<Conversations> result = await session.Agent.ListConversations(limit: PageSize, cursor: _cursor);
-            if (!result.Succeeded || result.Result is null)
+            ChatListMode requested = Mode;
+            Page result = await FetchAsync(session, _cursor);
+            if (!result.Ok || requested != Mode)
                 return;
 
             HashSet<string> known = Items.Select(i => i.Id).ToHashSet(StringComparer.Ordinal);
-            foreach (ConversationView view in result.Result)
+            foreach (ConversationView view in result.Views)
             {
                 if (known.Add(view.Id))
                     Items.Add(ChatMapper.ToConversationItem(view, session.Did));
             }
-            _cursor = result.Result.Cursor;
+            _cursor = result.Cursor;
+            RefreshDerived();
         }
         catch (Exception ex)
         {
@@ -198,8 +268,13 @@ public sealed partial class MessagesViewModel : ObservableObject
         if (conversation is null || !conversation.IsRequest)
             return;
 
+        // In the Requests list an accepted conversation leaves it; it is in the main list now.
+        int index = Items.IndexOf(conversation);
         conversation.IsRequest = false;
-        ChatService.Instance.UpdateUnreadFrom(Items);
+        if (IsRequestsMode && index >= 0)
+            Items.RemoveAt(index);
+        UpdateBadge();
+        IsEmpty = Items.Count == 0;
         if (PreviewMode.IsEnabled)
             return;
 
@@ -210,8 +285,63 @@ public sealed partial class MessagesViewModel : ObservableObject
             }, "Accept"))
         {
             conversation.IsRequest = true;
-            ChatService.Instance.UpdateUnreadFrom(Items);
+            if (IsRequestsMode && index >= 0)
+                Items.Insert(Math.Min(index, Items.Count), conversation);
+            UpdateBadge();
+            IsEmpty = Items.Count == 0;
         }
+        else
+        {
+            Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// Marks every accepted conversation read. The badge and rows clear at once; a refusal puts the counts back.
+    /// </summary>
+    [RelayCommand]
+    private async Task MarkAllReadAsync()
+    {
+        if (!CanMarkAllRead)
+            return;
+
+        List<(ConversationItem Item, long Count)> before = Items
+            .Where(i => i.IsUnread && !i.IsRequest)
+            .Select(i => (i, i.UnreadCount))
+            .ToList();
+        int badgeBefore = ChatService.Instance.UnreadCount;
+
+        foreach ((ConversationItem item, _) in before)
+            item.UnreadCount = 0;
+        ChatService.Instance.UpdateUnreadFrom(Items);
+        RefreshDerived();
+        if (PreviewMode.IsEnabled)
+            return;
+
+        if (await ChatCall(async agent =>
+            {
+                var r = await agent.UpdateAllRead(ConversationStatus.Accepted);
+                return (r.Succeeded, r.StatusCode, r.AtErrorDetail);
+            }, "Mark all read"))
+        {
+            // The server's count is the truth (muted chats, the 100 cap), so ask again.
+            _ = ChatService.Instance.CheckAsync(force: true);
+            return;
+        }
+
+        foreach ((ConversationItem item, long count) in before)
+            item.UnreadCount = count;
+        ChatService.Instance.UpdateUnreadFrom(Items);
+        if (ChatService.Instance.UnreadCount < badgeBefore)
+            _ = ChatService.Instance.CheckAsync(force: true);
+        RefreshDerived();
+    }
+
+    private void UpdateBadge()
+    {
+        if (ChatReadPolicy.UpdatesBadge(Mode))
+            ChatService.Instance.UpdateUnreadFrom(Items);
+        RefreshDerived();
     }
 
     /// <summary>Declines a request: it leaves the list at once and comes back if the server refuses.</summary>
@@ -270,11 +400,15 @@ public sealed partial class MessagesViewModel : ObservableObject
 
         _loadedAtUtc = DateTimeOffset.UtcNow;
         IsEmpty = Items.Count == 0;
-        ChatService.Instance.UpdateUnreadFrom(Items);
+        UpdateBadge();
     }
 
     private void Clear()
     {
+        Mode = ChatListMode.All;
+        OnPropertyChanged(nameof(Mode));
+        OnPropertyChanged(nameof(IsRequestsMode));
+        OnPropertyChanged(nameof(EmptyText));
         Items.Clear();
         _cursor = null;
         _loadedAtUtc = DateTimeOffset.MinValue;

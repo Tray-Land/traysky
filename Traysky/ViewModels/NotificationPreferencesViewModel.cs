@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using idunno.Bluesky.Chat.Notifications;
 using idunno.Bluesky.Notifications.PreferenceTypes;
 using System;
 using System.Collections.ObjectModel;
@@ -7,6 +8,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Traysky.Services;
 using Traysky.ViewModels.Items;
+using ChatPreference = idunno.Bluesky.Chat.Notifications.Preference;
+using ChatPreferences = idunno.Bluesky.Chat.Notifications.Preferences;
 using ServerPreferences = idunno.Bluesky.Notifications.Preferences;
 
 namespace Traysky.ViewModels;
@@ -30,9 +33,25 @@ public sealed partial class NotificationPreferencesViewModel : ObservableObject
             item.Edited += OnItemEdited;
             Items.Add(item);
         }
+
+        foreach (ChatPrefRow row in ChatNotificationPreferencePolicy.Rows)
+        {
+            var item = new ChatPrefItem(row);
+            item.Edited += OnChatItemEdited;
+            ChatItems.Add(item);
+        }
     }
 
     public ObservableCollection<NotificationPrefItem> Items { get; } = [];
+
+    /// <summary>Messages and message requests: they live in a separate record from the other types.</summary>
+    public ObservableCollection<ChatPrefItem> ChatItems { get; } = [];
+
+    /// <summary>False when the session has no direct message access, so there is nothing to show.</summary>
+    [ObservableProperty]
+    public partial bool IsChatReady { get; private set; }
+
+    private ChatPreferences? _currentChat;
 
     [ObservableProperty]
     public partial bool IsLoading { get; private set; }
@@ -55,7 +74,10 @@ public sealed partial class NotificationPreferencesViewModel : ObservableObject
         {
             foreach (NotificationPrefItem item in Items)
                 item.Set(showInList: true, push: item.Row.Type != NotificationPrefType.Like, followsOnly: item.Row.Type == NotificationPrefType.Follow);
+            foreach (ChatPrefItem chat in ChatItems)
+                chat.Set(ChatNotificationPreferencePolicy.DefaultPush, chat.Row.Type == ChatPrefType.ChatRequest);
             IsReady = true;
+            IsChatReady = true;
             return;
         }
 
@@ -76,6 +98,8 @@ public sealed partial class NotificationPreferencesViewModel : ObservableObject
             _current = result.Result;
             ApplyToItems(_current);
             IsReady = true;
+
+            await LoadChatAsync();
         }
         catch (Exception ex)
         {
@@ -87,6 +111,84 @@ public sealed partial class NotificationPreferencesViewModel : ObservableObject
             IsLoading = false;
         }
     }
+
+    /// <summary>
+    /// Chat preferences are best effort: a session without DM access can't read them, and that is
+    /// not an error on this screen, the section just stays hidden.
+    /// </summary>
+    private async Task LoadChatAsync()
+    {
+        if (!ChatService.Instance.CanUseChat)
+            return;
+
+        try
+        {
+            var result = await BlueskySessionService.Instance.Agent.GetChatNotificationPreferences();
+            if (!result.Succeeded || result.Result is null)
+            {
+                LogService.Warn("NotifPrefs", $"Chat get failed: {(int)result.StatusCode} {result.AtErrorDetail?.Error}");
+                return;
+            }
+
+            _currentChat = result.Result;
+            ApplyToChatItems(_currentChat);
+            IsChatReady = true;
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("NotifPrefs", $"Chat get threw: {ex.Message}");
+        }
+    }
+
+    private void OnChatItemEdited(ChatPrefItem item) => _ = SaveChatAsync(item);
+
+    private async Task SaveChatAsync(ChatPrefItem edited)
+    {
+        if (PreviewMode.IsEnabled || _currentChat is null)
+            return;
+
+        await _saveGate.WaitAsync();
+        try
+        {
+            Error = null;
+            ChatPreferences next = new(ToChatPreference(ChatItems[0]), ToChatPreference(ChatItems[1]));
+
+            var result = await BlueskySessionService.Instance.Agent.PutChatNotificationPreferences(next, CancellationToken.None);
+            if (result.Succeeded)
+            {
+                _currentChat = next;
+                return;
+            }
+
+            LogService.Warn("NotifPrefs", $"Chat put failed: {(int)result.StatusCode} {result.AtErrorDetail?.Error}");
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("NotifPrefs", $"Chat put threw: {ex.Message}");
+        }
+        finally
+        {
+            _saveGate.Release();
+        }
+
+        ApplyToChatItems(_currentChat);
+        Error = $"Couldn't save the {edited.Label.ToLowerInvariant()} setting. It was put back.";
+    }
+
+    private void ApplyToChatItems(ChatPreferences prefs)
+    {
+        ChatItems[0].Set(ReadChat(prefs.Chat).Push, ReadChat(prefs.Chat).FollowsOnly);
+        ChatItems[1].Set(ReadChat(prefs.ChatRequest).Push, ReadChat(prefs.ChatRequest).FollowsOnly);
+    }
+
+    // A preference the server did not send reads as Bluesky's default.
+    private static (bool Push, bool FollowsOnly) ReadChat(ChatPreference? p) =>
+        p is null
+            ? (ChatNotificationPreferencePolicy.DefaultPush, ChatNotificationPreferencePolicy.DefaultFollowsOnly)
+            : (p.Push, string.Equals(p.Include, ChatPreferencesKnownValues.Follows, StringComparison.Ordinal));
+
+    private static ChatPreference ToChatPreference(ChatPrefItem i) =>
+        new(i.FollowsOnly ? ChatPreferencesKnownValues.Follows : ChatPreferencesKnownValues.All, i.Push);
 
     private void OnItemEdited(NotificationPrefItem item) => _ = SaveAsync(item);
 

@@ -26,36 +26,59 @@
                 </Style>
             </ListView.ItemContainerStyle>
             <ListView.Header>
-                <Grid Margin="12,4,12,8" ColumnSpacing="4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock
-                        VerticalAlignment="Center"
-                        FontSize="18"
-                        FontWeight="SemiBold"
-                        Text="Messages" />
-                    <Button
-                        Grid.Column="1"
-                        Padding="8"
-                        Background="Transparent"
-                        BorderThickness="0"
-                        Click="JoinGroup_Click"
-                        ToolTipService.ToolTip="Join a group with a link">
-                        <FontIcon FontSize="14" Glyph="&#xE71B;" />
-                    </Button>
-                    <Button
-                        Grid.Column="2"
-                        Padding="8"
-                        Background="Transparent"
-                        BorderThickness="0"
-                        Click="NewGroup_Click"
-                        ToolTipService.ToolTip="New group">
-                        <FontIcon FontSize="14" Glyph="&#xE902;" />
-                    </Button>
-                </Grid>
+                <StackPanel>
+                    <Grid Margin="12,4,12,0" ColumnSpacing="4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="18"
+                            FontWeight="SemiBold"
+                            Text="Messages" />
+                        <Button
+                            Grid.Column="1"
+                            Padding="8"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Command="{x:Bind ViewModel.MarkAllReadCommand}"
+                            IsEnabled="{x:Bind ViewModel.CanMarkAllRead, Mode=OneWay}"
+                            ToolTipService.ToolTip="Mark all as read">
+                            <FontIcon FontSize="14" Glyph="&#xE73E;" />
+                        </Button>
+                        <Button
+                            Grid.Column="2"
+                            Padding="8"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Click="JoinGroup_Click"
+                            ToolTipService.ToolTip="Join a group with a link">
+                            <FontIcon FontSize="14" Glyph="&#xE71B;" />
+                        </Button>
+                        <Button
+                            Grid.Column="3"
+                            Padding="8"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Click="NewGroup_Click"
+                            ToolTipService.ToolTip="New group">
+                            <FontIcon FontSize="14" Glyph="&#xE902;" />
+                        </Button>
+                    </Grid>
+                    <SelectorBar
+                        x:Name="Tabs"
+                        Margin="4,0,4,4"
+                        SelectionChanged="Tabs_SelectionChanged">
+                        <SelectorBarItem
+                            x:Name="AllTab"
+                            IsSelected="True"
+                            Text="All" />
+                        <SelectorBarItem x:Name="RequestsTab" Text="{x:Bind ViewModel.RequestsLabel, Mode=OneWay}" />
+                    </SelectorBar>
+                </StackPanel>
             </ListView.Header>
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="items:ConversationItem">
@@ -174,7 +197,7 @@
             <TextBlock
                 HorizontalAlignment="Center"
                 Style="{StaticResource SecondaryTextStyle}"
-                Text="No conversations yet. Start one with the Message button on someone's profile."
+                Text="{x:Bind ViewModel.EmptyText, Mode=OneWay}"
                 TextAlignment="Center"
                 TextWrapping="Wrap" />
         </StackPanel>

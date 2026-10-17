@@ -164,4 +164,13 @@ public class GroupChatPolicyTests
         StringAssert.Contains(GroupChatPolicy.JoinOutcomeText(true, "Club"), "joined");
         StringAssert.Contains(GroupChatPolicy.JoinOutcomeText(false, "Club"), "approve");
     }
+
+    [TestMethod]
+    public void CanWithdrawJoinRequest_NeedsPendingRequestAndGroupId()
+    {
+        Assert.IsTrue(GroupChatPolicy.CanWithdrawJoinRequest(true, "convo1"));
+        Assert.IsFalse(GroupChatPolicy.CanWithdrawJoinRequest(false, "convo1"));
+        Assert.IsFalse(GroupChatPolicy.CanWithdrawJoinRequest(true, null));
+        Assert.IsFalse(GroupChatPolicy.CanWithdrawJoinRequest(true, "  "));
+    }
 }

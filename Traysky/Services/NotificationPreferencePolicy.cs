@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace Traysky.Services;
 
-/// <summary>The server-side notification types Traysky lets you tune. Chat is left to the Messages screen.</summary>
+/// <summary>The server-side notification types Traysky lets you tune. Chat has its own rows in <see cref="ChatNotificationPreferencePolicy"/>.</summary>
 public enum NotificationPrefType
 {
     Like,

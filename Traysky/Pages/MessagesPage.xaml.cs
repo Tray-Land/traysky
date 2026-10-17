@@ -51,6 +51,16 @@ public sealed partial class MessagesPage : Page
             _ = ViewModel.LoadMoreAsync();
     }
 
+    private void Tabs_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        // IsSelected in XAML can raise SelectionChanged mid-InitializeComponent, before the tabs exist.
+        if (RequestsTab is null)
+            return;
+
+        ChatListMode mode = sender.SelectedItem == RequestsTab ? ChatListMode.Requests : ChatListMode.All;
+        _ = ViewModel.SetModeAsync(mode);
+    }
+
     private void ConversationList_ItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is ConversationItem conversation)

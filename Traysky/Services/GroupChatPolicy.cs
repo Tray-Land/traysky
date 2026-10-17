@@ -56,6 +56,10 @@ public static class GroupChatPolicy
         && otherMembers >= 1
         && otherMembers + 1 <= memberLimit;
 
+    /// <summary>A pending join request can be cancelled once the preview says which group it is for.</summary>
+    public static bool CanWithdrawJoinRequest(bool requestPending, string? conversationId) =>
+        requestPending && !string.IsNullOrWhiteSpace(conversationId);
+
     /// <summary>How many more people can still be picked for a new group or added to an existing one.</summary>
     public static int RoomLeft(int currentMembers, int memberLimit) => Math.Max(0, memberLimit - currentMembers);
 

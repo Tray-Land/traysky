@@ -152,7 +152,7 @@ public static class GroupDialogs
 
         if (preview.RequestPending)
         {
-            await ModerationDialogs.ShowMessageAsync(root, preview.Name, "You've already asked to join. The owner has to approve it.");
+            await OfferWithdrawAsync(root, preview);
             return;
         }
 
@@ -192,6 +192,35 @@ public static class GroupDialogs
         }
 
         await ModerationDialogs.ShowMessageAsync(root, preview.Name, GroupChatPolicy.JoinOutcomeText(false, preview.Name));
+    }
+
+    /// <summary>Tells the user their request is waiting, and lets them cancel it when the preview says which group it is.</summary>
+    private static async Task OfferWithdrawAsync(XamlRoot root, GroupJoinPreview preview)
+    {
+        const string waiting = "You've already asked to join. The owner has to approve it.";
+        if (!GroupChatPolicy.CanWithdrawJoinRequest(preview.RequestPending, preview.ConversationId) || preview.ConversationId is not { } conversationId)
+        {
+            await ModerationDialogs.ShowMessageAsync(root, preview.Name, waiting);
+            return;
+        }
+
+        ContentDialog dialog = new()
+        {
+            XamlRoot = root,
+            Title = preview.Name.Length > 0 ? preview.Name : "Join request",
+            Content = waiting,
+            PrimaryButtonText = "Cancel request",
+            CloseButtonText = "Keep waiting",
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            return;
+
+        if (PreviewMode.IsEnabled)
+            return;
+
+        if (await GroupChatService.WithdrawJoinRequestAsync(conversationId) is { } error)
+            await ModerationDialogs.ShowMessageAsync(root, "Couldn't cancel the request", error);
     }
 
     // ---- People picker -------------------------------------------------------------------

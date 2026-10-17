@@ -49,6 +49,25 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+
+            <StackPanel Spacing="10" Visibility="{x:Bind ViewModel.IsChatReady, Mode=OneWay}">
+                <TextBlock Style="{StaticResource SettingTitleStyle}" Text="Direct messages" />
+                <ItemsControl ItemsSource="{x:Bind ViewModel.ChatItems}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="items:ChatPrefItem">
+                            <Border Margin="0,0,0,10" Style="{StaticResource SettingCardStyle}">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Style="{StaticResource SettingTitleStyle}" Text="{x:Bind Label}" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionStyle}" Text="{x:Bind Description}" />
+                                    <CheckBox Content="Push" IsChecked="{x:Bind Push, Mode=TwoWay}" />
+                                    <CheckBox Content="Only from people I follow" IsChecked="{x:Bind FollowsOnly, Mode=TwoWay}" />
+                                    <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Summary, Mode=OneWay}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
         </StackPanel>
     </ScrollViewer>
 </Page>
