@@ -65,6 +65,40 @@ public static class ComposeAttachmentPolicy
     /// <summary>A video can only be added to a post that has no images and no video already.</summary>
     public static bool CanAddVideo(int currentImageCount, bool hasVideo) => !hasVideo && currentImageCount == 0;
 
+    /// <summary>
+    /// Checks a video against the account's daily video-service allowance (from <c>getUploadLimits</c>).
+    /// A null remaining value means no limit is imposed. Returns a user-facing message when the video
+    /// can't go up, otherwise null.
+    /// </summary>
+    public static string? ValidateVideoLimits(bool canUpload, long? remainingVideos, long? remainingBytes, long sizeBytes)
+    {
+        if (!canUpload)
+            return "Video uploads aren't available for this account right now.";
+        if (remainingVideos is <= 0)
+            return "You've reached today's video upload limit. Try again tomorrow.";
+        if (remainingBytes is { } bytes && sizeBytes > bytes)
+            return bytes <= 0
+                ? "You've reached today's video upload limit. Try again tomorrow."
+                : $"This video is larger than the {FormatMegabytes(bytes)} you have left to upload today.";
+        return null;
+    }
+
+    /// <summary>"3 videos, 120 MB left today", or null when the account has no daily limit to show.</summary>
+    public static string? LimitsSummary(long? remainingVideos, long? remainingBytes)
+    {
+        string? videos = remainingVideos is { } v ? $"{Math.Max(v, 0)} video{(v == 1 ? string.Empty : "s")}" : null;
+        string? size = remainingBytes is { } b ? FormatMegabytes(Math.Max(b, 0)) : null;
+        return (videos, size) switch
+        {
+            (null, null) => null,
+            (not null, null) => $"{videos} left today",
+            (null, not null) => $"{size} left today",
+            _ => $"{videos}, {size} left today"
+        };
+    }
+
+    private static string FormatMegabytes(long bytes) => $"{bytes / 1_000_000.0:0.#} MB";
+
     /// <summary>Returns a user-facing error message if <paramref name="sizeBytes"/> exceeds the limit for <paramref name="kind"/>, otherwise null.</summary>
     public static string? ValidateSize(ComposeAttachmentKind kind, long sizeBytes) => kind switch
     {

@@ -45,6 +45,10 @@ public sealed partial class ComposeViewModel : ObservableObject
         Drafts.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ShowNoDrafts));
         Attachments.CollectionChanged += (_, _) =>
         {
+            if (!HasVideoAttachment)
+                VideoLimitsText = null;
+            if (UploadPhase == UploadPhase.Cancelled)
+                SetPhase(UploadPhase.Idle); // the "Upload cancelled" note is stale once the attachments change
             OnPropertyChanged(nameof(HasAttachments));
             OnPropertyChanged(nameof(HasVideoAttachment));
             OnPropertyChanged(nameof(ImageAttachmentCount));
@@ -126,6 +130,41 @@ public sealed partial class ComposeViewModel : ObservableObject
     public partial string? UploadStatus { get; private set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanCancelUpload))]
+    [NotifyCanExecuteChangedFor(nameof(CancelUploadCommand))]
+    public partial UploadPhase UploadPhase { get; private set; }
+
+    public bool CanCancelUpload => UploadProgressPolicy.CanCancel(UploadPhase);
+
+    /// <summary>0–1 while a multipart video upload reports progress; null when indeterminate.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUploadProgress))]
+    [NotifyPropertyChangedFor(nameof(UploadProgressValue))]
+    public partial double? UploadProgress { get; private set; }
+
+    public bool HasUploadProgress => UploadProgress is not null;
+
+    public double UploadProgressValue => UploadProgress ?? 0;
+
+    /// <summary>"3 videos, 120 MB left today", from the last <c>getUploadLimits</c> check; null when unlimited or unknown.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasVideoLimitsText))]
+    public partial string? VideoLimitsText { get; private set; }
+
+    public bool HasVideoLimitsText => !string.IsNullOrEmpty(VideoLimitsText);
+
+    // The compose box is a singleton, so closing the popup or navigating away does not cancel an
+    // in-flight upload: it finishes (or fails) in the background and the post goes out. Drafts only
+    // store text and picked files, never upload state, so a draft can't capture a half-finished upload.
+    private CancellationTokenSource? _uploadCts;
+
+    private void SetPhase(UploadPhase phase, bool isVideo = false)
+    {
+        UploadPhase = phase;
+        UploadStatus = UploadProgressPolicy.StatusText(phase, isVideo, Attachments.Count);
+    }
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasError))]
     public partial string? Error { get; private set; }
 
@@ -200,7 +239,14 @@ public sealed partial class ComposeViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void RemoveAttachment(ComposeAttachmentItem attachment) => Attachments.Remove(attachment);
+    private void RemoveAttachment(ComposeAttachmentItem attachment)
+    {
+        if (UploadProgressPolicy.CanEditAttachments(UploadPhase))
+            Attachments.Remove(attachment);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanCancelUpload))]
+    private void CancelUpload() => _uploadCts?.Cancel();
 
     [RelayCommand]
     private Task AttachImageAsync() => AttachAsync(ComposeAttachmentKind.Image);
@@ -282,7 +328,7 @@ public sealed partial class ComposeViewModel : ObservableObject
             bool attachedAny = await AddFilesAsync(items.OfType<StorageFile>());
 
             if (!attachedAny && Error is null && items.Count > 0)
-                Error = "Clipboard doesn't contain a supported image or video.";
+                Error = "That doesn't contain a supported image or video.";
 
             return;
         }
@@ -299,6 +345,42 @@ public sealed partial class ComposeViewModel : ObservableObject
             await AddClipboardBitmapAsync(streamRef);
         }
     }
+
+    /// <summary>
+    /// Takes in something dragged onto the compose box. Files and pictures go through the same
+    /// attach rules as paste; plain text (or a dragged link) is appended to the draft.
+    /// </summary>
+    public async Task AcceptDropAsync(DataPackageView dataPackageView)
+    {
+        ComposeDropKind kind = ClassifyDrop(dataPackageView);
+        if (kind == ComposeDropKind.None)
+            return;
+
+        IsExpanded = true;
+
+        if (kind == ComposeDropKind.Media)
+        {
+            await TryAttachFromClipboardAsync(dataPackageView);
+            return;
+        }
+
+        string? dropped = dataPackageView.Contains(StandardDataFormats.Text)
+            ? await dataPackageView.GetTextAsync()
+            : (await dataPackageView.GetWebLinkAsync())?.AbsoluteUri;
+
+        if (string.IsNullOrWhiteSpace(dropped))
+            return;
+
+        Error = null;
+        Text = ShareTargetPolicy.MergeIntoDraft(Text, dropped.Trim());
+        FocusRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    public static ComposeDropKind ClassifyDrop(DataPackageView dataPackageView) => ComposeDropPolicy.Classify(
+        dataPackageView.Contains(StandardDataFormats.StorageItems),
+        dataPackageView.Contains(StandardDataFormats.Bitmap),
+        dataPackageView.Contains(StandardDataFormats.Text),
+        dataPackageView.Contains(StandardDataFormats.WebLink));
 
     /// <summary>
     /// Takes in something shared to Traysky from another app (see <see cref="ShareTargetService"/>)
@@ -516,6 +598,24 @@ public sealed partial class ComposeViewModel : ObservableObject
         {
             Error = sizeError;
             return;
+        }
+
+        // Preflight against today's video allowance so it fails here rather than after a long upload.
+        // If the check itself fails the attach still goes ahead; the video service is authoritative.
+        if (BlueskySessionService.Instance.IsSignedIn)
+        {
+            var limits = await VideoUploadService.GetLimitsAsync(BlueskySessionService.Instance.Agent);
+            if (limits is { Succeeded: true, Result: { } allowance })
+            {
+                string? limitError = ComposeAttachmentPolicy.ValidateVideoLimits(
+                    allowance.CanUpload, allowance.RemainingDailyVideos, allowance.RemainingDailyBytes, bytes.Length);
+                VideoLimitsText = ComposeAttachmentPolicy.LimitsSummary(allowance.RemainingDailyVideos, allowance.RemainingDailyBytes);
+                if (limitError is not null)
+                {
+                    Error = limitError;
+                    return;
+                }
+            }
         }
 
         Attachments.Add(new ComposeAttachmentItem
@@ -945,10 +1045,15 @@ public sealed partial class ComposeViewModel : ObservableObject
 
         IsPosting = true;
         Error = null;
-        UploadStatus = null;
+        SetPhase(UploadPhase.Idle);
         string text = Text.Trim();
         string lang = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
         BlueskyAgent agent = BlueskySessionService.Instance.Agent;
+        bool isVideo = HasVideoAttachment;
+
+        using var uploadCts = new CancellationTokenSource();
+        _uploadCts = uploadCts;
+        CancellationToken ct = uploadCts.Token;
 
         try
         {
@@ -958,9 +1063,9 @@ public sealed partial class ComposeViewModel : ObservableObject
             {
                 var builder = new PostBuilder(text, langs: new[] { lang });
 
-                if (HasVideoAttachment)
+                if (isVideo)
                 {
-                    EmbeddedVideo? video = await UploadVideoAsync(agent, Attachments.First(a => a.IsVideo));
+                    EmbeddedVideo? video = await UploadVideoAsync(agent, Attachments.First(a => a.IsVideo), ct);
                     if (video is null)
                         return;
 
@@ -969,10 +1074,10 @@ public sealed partial class ComposeViewModel : ObservableObject
                 else
                 {
                     var images = new List<EmbeddedImage>();
-                    UploadStatus = Attachments.Count > 1 ? "Uploading images…" : "Uploading image…";
-                    foreach (ComposeAttachmentItem attachment in Attachments)
+                    SetPhase(UploadProgressPolicy.Begin(UploadPhase));
+                    foreach (ComposeAttachmentItem attachment in Attachments.ToList())
                     {
-                        AtProtoHttpResult<Blob> uploadResult = await agent.UploadBlob(attachment.Bytes, attachment.MimeType);
+                        AtProtoHttpResult<Blob> uploadResult = await agent.UploadBlob(attachment.Bytes, attachment.MimeType, cancellationToken: ct);
                         if (!uploadResult.Succeeded || uploadResult.Result is null)
                         {
                             Error = "Couldn't upload an image. Try again.";
@@ -988,33 +1093,32 @@ public sealed partial class ComposeViewModel : ObservableObject
                     builder.Add((ICollection<EmbeddedImage>)images);
                 }
 
-                UploadStatus = null;
+                // Past this point the media is uploaded; cancelling is no longer offered and the record is created.
+                SetPhase(UploadProgressPolicy.Complete(UploadPhase), isVideo);
 
                 if (ReplyTo is not null)
                     builder = await builder.ReplyTo(ReplyTo.Reference, agent);
                 if (QuoteOf is not null)
                     builder.Add(QuoteOf.Reference);
 
-                await builder.ExtractFacets(agent.FacetExtractor, CancellationToken.None);
+                await builder.ExtractFacets(new HashtagAwareFacetExtractor(agent.FacetExtractor), CancellationToken.None);
                 result = await agent.Post(builder);
             }
-            else if (HasLinkCard && _linkCard is not null)
+            else
             {
+                // Always a builder, never agent.Post(text): the library's own extractor would end a tag at a hyphen.
                 var builder = new PostBuilder(text, langs: new[] { lang });
-                builder.EmbedRecord(_linkCard);
+                if (HasLinkCard && _linkCard is not null)
+                    builder.EmbedRecord(_linkCard);
 
                 if (ReplyTo is not null)
                     builder = await builder.ReplyTo(ReplyTo.Reference, agent);
+                if (QuoteOf is not null)
+                    builder.Add(QuoteOf.Reference);
 
-                await builder.ExtractFacets(agent.FacetExtractor, CancellationToken.None);
+                await builder.ExtractFacets(new HashtagAwareFacetExtractor(agent.FacetExtractor), CancellationToken.None);
                 result = await agent.Post(builder);
             }
-            else if (ReplyTo is not null)
-                result = await agent.ReplyTo(ReplyTo.Reference, text);
-            else if (QuoteOf is not null)
-                result = await agent.Quote(QuoteOf.Reference, text);
-            else
-                result = await agent.Post(text, langs: [lang]);
 
             if (result.Succeeded)
             {
@@ -1061,6 +1165,13 @@ public sealed partial class ComposeViewModel : ObservableObject
                 _ => string.IsNullOrEmpty(result.AtErrorDetail?.Message) ? "Post failed. Your draft is safe." : result.AtErrorDetail.Message
             };
         }
+        catch (OperationCanceledException)
+        {
+            // The user cancelled: not an error. Attachments stay so they can retry; any blobs already
+            // uploaded are simply abandoned (the PDS garbage-collects unreferenced blobs).
+            LogService.Info("Compose", "Upload cancelled");
+            SetPhase(UploadProgressPolicy.Cancel(UploadPhase), isVideo);
+        }
         catch (Exception ex)
         {
             LogService.Error("Compose", "Post threw", ex);
@@ -1068,8 +1179,11 @@ public sealed partial class ComposeViewModel : ObservableObject
         }
         finally
         {
+            // An early return with an error leaves the phase active; settle it so nothing reads "Uploading…".
+            SetPhase(UploadProgressPolicy.Fail(UploadPhase), isVideo);
+            _uploadCts = null;
+            UploadProgress = null;
             IsPosting = false;
-            UploadStatus = null;
         }
     }
 
@@ -1078,25 +1192,38 @@ public sealed partial class ComposeViewModel : ObservableObject
     /// asynchronous (transcoding happens server-side), so unlike an image blob this needs a
     /// poll loop; returns null (with <see cref="Error"/> set) if the upload or processing fails.
     /// </summary>
-    private async Task<EmbeddedVideo?> UploadVideoAsync(BlueskyAgent agent, ComposeAttachmentItem attachment)
+    private async Task<EmbeddedVideo?> UploadVideoAsync(BlueskyAgent agent, ComposeAttachmentItem attachment, CancellationToken ct)
     {
-        UploadStatus = "Uploading video…";
-        AtProtoHttpResult<JobStatus> uploadResult = await agent.UploadVideo(attachment.FileName, attachment.Bytes, attachment.MimeType);
-        if (!uploadResult.Succeeded || uploadResult.Result is null)
+        SetPhase(UploadProgressPolicy.Begin(UploadPhase), isVideo: true);
+        UploadProgress = 0;
+        VideoUploadOutcome outcome = await VideoUploadService.UploadAsync(
+            agent, attachment.FileName, attachment.Bytes, attachment.MimeType, new Progress<double>(p => UploadProgress = p), ct);
+
+        JobStatus? uploaded = outcome.Job;
+        if (outcome.UseSingleRequest)
         {
-            Error = "Couldn't upload the video. Try again.";
+            // The multipart route isn't usable; fall back to the original single request (no progress).
+            UploadProgress = null;
+            AtProtoHttpResult<JobStatus> uploadResult = await agent.UploadVideo(attachment.FileName, attachment.Bytes, attachment.MimeType, ct);
+            uploaded = uploadResult.Succeeded ? uploadResult.Result : null;
+        }
+
+        if (uploaded is null)
+        {
+            Error = outcome.Error ?? "Couldn't upload the video. Try again.";
             return null;
         }
 
-        JobStatus job = uploadResult.Result;
-        UploadStatus = "Processing video…";
+        UploadProgress = null;
+        JobStatus job = uploaded;
+        SetPhase(UploadProgressPolicy.BeginProcessing(UploadPhase), isVideo: true);
 
-        // The transcoding job is polled rather than pushed; two minutes covers all but
-        // exceptionally long clips, and failing loudly beats spinning forever.
-        for (int attempt = 0; job.State is not (JobState.Completed or JobState.Failed) && attempt < 60; attempt++)
+        // The transcoding job is polled rather than pushed; the budget is bounded because
+        // failing loudly beats spinning forever.
+        for (int attempt = 0; job.State is not (JobState.Completed or JobState.Failed) && !UploadProgressPolicy.IsPollBudgetSpent(attempt); attempt++)
         {
-            await Task.Delay(TimeSpan.FromSeconds(2));
-            AtProtoHttpResult<JobStatus> statusResult = await agent.GetJobStatus(job.JobId);
+            await Task.Delay(UploadProgressPolicy.PollInterval, ct);
+            AtProtoHttpResult<JobStatus> statusResult = await agent.GetJobStatus(job.JobId, ct);
             if (!statusResult.Succeeded || statusResult.Result is null)
             {
                 Error = "Couldn't check video processing status.";
