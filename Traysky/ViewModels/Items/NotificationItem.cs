@@ -50,6 +50,7 @@ public sealed class NotificationItem
         NotificationKind.Reply => "Reply to you",
         NotificationKind.Mention => "Mentions you",
         NotificationKind.Quote => "Quotes your post",
+        NotificationKind.SubscribedPost => "New post from an account you get notifications for",
         _ => Headline
     };
 

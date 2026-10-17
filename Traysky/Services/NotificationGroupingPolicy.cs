@@ -135,6 +135,15 @@ public static class NotificationGroupingPolicy
         return $"{Names(group)} {verb}";
     }
 
+    /// <summary>The verb in a toast title for a notification that gets its own toast: "Alice replied".</summary>
+    public static string ToastVerb(NotificationKind kind) => kind switch
+    {
+        NotificationKind.Reply => "replied",
+        NotificationKind.Quote => "quoted you",
+        NotificationKind.SubscribedPost => "posted",
+        _ => "mentioned you"
+    };
+
     private static string Names(NotificationGroup group)
     {
         IReadOnlyList<NotificationInput> m = group.Members;

@@ -77,6 +77,7 @@ public sealed class NotificationAnnouncer
                     case NotificationKind.Mention when SettingsService.ToastMentions:
                     case NotificationKind.Reply when SettingsService.ToastReplies:
                     case NotificationKind.Quote when SettingsService.ToastQuotes:
+                    case NotificationKind.SubscribedPost when SettingsService.ToastSubscribedPosts:
                         individual.Add(n);
                         break;
                     case NotificationKind.Like when SettingsService.ToastLikesReposts:
@@ -98,12 +99,7 @@ public sealed class NotificationAnnouncer
             {
                 Notification n = individual[i];
                 string who = FeedMapper.DisplayNameOf(n.Author);
-                string verb = FeedMapper.ToKind(n.Reason) switch
-                {
-                    NotificationKind.Reply => "replied",
-                    NotificationKind.Quote => "quoted you",
-                    _ => "mentioned you"
-                };
+                string verb = NotificationGroupingPolicy.ToastVerb(FeedMapper.ToKind(n.Reason));
                 string body = (n.Record as Post)?.Text ?? string.Empty;
                 ToastService.Show($"{who} {verb}", body, ShellDestination.Notifications, n.Author.Avatar);
             }
@@ -124,5 +120,5 @@ public sealed class NotificationAnnouncer
 
     private static bool AnyToastEnabled() =>
         SettingsService.ToastMentions || SettingsService.ToastReplies || SettingsService.ToastQuotes
-        || SettingsService.ToastFollows || SettingsService.ToastLikesReposts;
+        || SettingsService.ToastSubscribedPosts || SettingsService.ToastFollows || SettingsService.ToastLikesReposts;
 }

@@ -240,7 +240,7 @@ public sealed partial class NotificationsViewModel : ObservableObject
             string? uri = FeedMapper.ToKind(n.Reason) switch
             {
                 NotificationKind.Like or NotificationKind.Repost => FeedMapper.SubjectUriOf(n),
-                NotificationKind.Mention or NotificationKind.Reply or NotificationKind.Quote => n.Uri.ToString(),
+                NotificationKind.Mention or NotificationKind.Reply or NotificationKind.Quote or NotificationKind.SubscribedPost => n.Uri.ToString(),
                 _ => null
             };
 
@@ -256,7 +256,8 @@ public sealed partial class NotificationsViewModel : ObservableObject
             List<AtUri> batch = wanted.Skip(i).Take(25).ToList();
             try
             {
-                AtProtoHttpResult<IReadOnlyCollection<PostView>> posts = await BlueskySessionService.Instance.Agent.GetPosts(batch);
+                await LabelService.Instance.EnsureLoadedAsync();
+                AtProtoHttpResult<IReadOnlyCollection<PostView>> posts = await BlueskySessionService.Instance.Agent.GetPosts(batch, LabelService.Instance.Subscribed);
                 if (!posts.Succeeded || posts.Result is null)
                 {
                     LogService.Warn("Notifications", $"GetPosts failed: {(int)posts.StatusCode} {posts.AtErrorDetail?.Error}");

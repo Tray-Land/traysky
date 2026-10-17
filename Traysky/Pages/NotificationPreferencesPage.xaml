@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Traysky.Pages.NotificationPreferencesPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:items="using:Traysky.ViewModels.Items"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="12,4,12,16" Spacing="10">
+            <TextBlock Style="{StaticResource SettingDescriptionStyle}" Text="These are Bluesky's own settings for your account, so they apply in every app. Each change saves as you make it." />
+
+            <InfoBar
+                IsClosable="False"
+                IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
+                Message="{x:Bind ViewModel.Error, Mode=OneWay}"
+                Severity="Warning">
+                <InfoBar.ActionButton>
+                    <Button Command="{x:Bind ViewModel.RetryCommand}" Content="Retry" Visibility="{x:Bind RetryVisibility(ViewModel.IsReady), Mode=OneWay}" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+
+            <ProgressRing
+                Width="20"
+                Height="20"
+                HorizontalAlignment="Center"
+                IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}" />
+
+            <ItemsControl IsEnabled="{x:Bind ViewModel.IsReady, Mode=OneWay}" ItemsSource="{x:Bind ViewModel.Items}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="items:NotificationPrefItem">
+                        <Border Margin="0,0,0,10" Style="{StaticResource SettingCardStyle}">
+                            <StackPanel Spacing="4">
+                                <TextBlock Style="{StaticResource SettingTitleStyle}" Text="{x:Bind Label}" />
+                                <TextBlock Style="{StaticResource SettingDescriptionStyle}" Text="{x:Bind Description}" />
+                                <StackPanel Orientation="Horizontal" Spacing="16">
+                                    <CheckBox Content="In your list" IsChecked="{x:Bind ShowInList, Mode=TwoWay}" />
+                                    <CheckBox Content="Push" IsChecked="{x:Bind Push, Mode=TwoWay}" />
+                                </StackPanel>
+                                <CheckBox
+                                    Content="Only from people I follow"
+                                    IsChecked="{x:Bind FollowsOnly, Mode=TwoWay}"
+                                    Visibility="{x:Bind CanLimitToFollows}" />
+                                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Summary, Mode=OneWay}" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</Page>
