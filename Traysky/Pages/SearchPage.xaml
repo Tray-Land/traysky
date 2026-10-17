@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Traysky.Pages.SearchPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Traysky.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:helpers="using:Traysky.Helpers"
+    xmlns:items="using:Traysky.ViewModels.Items"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:Traysky.ViewModels"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <Style
+            x:Key="SearchRowStyle"
+            BasedOn="{StaticResource DefaultListViewItemStyle}"
+            TargetType="ListViewItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+    </Page.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <AutoSuggestBox
+            x:Name="SearchBox"
+            Margin="12,4,12,8"
+            PlaceholderText="Search Bluesky"
+            QueryIcon="Find"
+            QuerySubmitted="SearchBox_QuerySubmitted"
+            SuggestionChosen="SearchBox_SuggestionChosen"
+            TextChanged="SearchBox_TextChanged"
+            TextMemberPath="Text">
+            <AutoSuggestBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:SearchSuggestion">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <FontIcon FontSize="14" Glyph="{x:Bind Glyph}" />
+                        <TextBlock Text="{x:Bind Text}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </DataTemplate>
+            </AutoSuggestBox.ItemTemplate>
+        </AutoSuggestBox>
+
+        <SelectorBar
+            x:Name="Tabs"
+            Grid.Row="1"
+            Margin="8,0,8,4"
+            SelectionChanged="Tabs_SelectionChanged">
+            <SelectorBarItem
+                x:Name="PostsTab"
+                IsSelected="True"
+                Text="Posts" />
+            <SelectorBarItem x:Name="PeopleTab" Text="People" />
+            <SelectorBarItem x:Name="PacksTab" Text="Starter packs" />
+        </SelectorBar>
+
+        <InfoBar
+            Grid.Row="2"
+            Margin="12,0,12,8"
+            IsClosable="False"
+            IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
+            Message="{x:Bind ViewModel.Error, Mode=OneWay}"
+            Severity="Warning">
+            <InfoBar.ActionButton>
+                <Button Command="{x:Bind ViewModel.RetryCommand}" Content="Retry" />
+            </InfoBar.ActionButton>
+        </InfoBar>
+
+        <Grid Grid.Row="3">
+            <!--  Posts  -->
+            <ListView
+                x:Name="PostList"
+                IsItemClickEnabled="False"
+                ItemContainerStyle="{StaticResource SearchRowStyle}"
+                ItemsSource="{x:Bind ViewModel.Posts}"
+                SelectionMode="None">
+                <ListView.Header>
+                    <StackPanel>
+                        <ToggleSwitch
+                            Margin="12,0,12,4"
+                            IsOn="{x:Bind ViewModel.LatestPosts, Mode=TwoWay}"
+                            OffContent="Top posts"
+                            OnContent="Latest posts" />
+                        <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    </StackPanel>
+                </ListView.Header>
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="items:PostItem">
+                        <Grid>
+                            <controls:PostCard Post="{x:Bind}" ThreadRequested="PostCard_ThreadRequested" />
+                            <Rectangle
+                                Height="1"
+                                VerticalAlignment="Bottom"
+                                Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+
+            <!--  People  -->
+            <ListView
+                x:Name="PeopleList"
+                IsItemClickEnabled="True"
+                ItemClick="PeopleList_ItemClick"
+                ItemContainerStyle="{StaticResource SearchRowStyle}"
+                ItemsSource="{x:Bind ViewModel.People}"
+                SelectionMode="None"
+                Visibility="Collapsed">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="items:ActorItem">
+                        <Grid Padding="12,8" ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <PersonPicture
+                                Width="{StaticResource AvatarSize}"
+                                Height="{StaticResource AvatarSize}"
+                                DisplayName="{x:Bind NameOrHandle}"
+                                ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(AvatarUri)}" />
+                            <StackPanel
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Spacing="1">
+                                <TextBlock
+                                    FontWeight="SemiBold"
+                                    Text="{x:Bind NameOrHandle}"
+                                    TextTrimming="CharacterEllipsis" />
+                                <TextBlock
+                                    Style="{StaticResource SecondaryTextStyle}"
+                                    Text="{x:Bind HandleDisplay}"
+                                    TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+
+            <!--  Starter packs (open the pack's member list)  -->
+            <ListView
+                x:Name="PackList"
+                IsItemClickEnabled="True"
+                ItemClick="PackList_ItemClick"
+                ItemContainerStyle="{StaticResource SearchRowStyle}"
+                ItemsSource="{x:Bind ViewModel.StarterPacks}"
+                SelectionMode="None"
+                Visibility="Collapsed">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="items:StarterPackItem">
+                        <Grid Padding="12,8" ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <PersonPicture
+                                Width="{StaticResource AvatarSize}"
+                                Height="{StaticResource AvatarSize}"
+                                VerticalAlignment="Top"
+                                DisplayName="{x:Bind Name}"
+                                ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(CreatorAvatarUri)}" />
+                            <StackPanel Grid.Column="1" Spacing="1">
+                                <TextBlock
+                                    FontWeight="SemiBold"
+                                    Text="{x:Bind Name}"
+                                    TextTrimming="CharacterEllipsis" />
+                                <TextBlock
+                                    Style="{StaticResource SecondaryTextStyle}"
+                                    Text="{x:Bind ByLine}"
+                                    TextTrimming="CharacterEllipsis" />
+                                <TextBlock
+                                    MaxLines="3"
+                                    Text="{x:Bind Description}"
+                                    TextTrimming="CharacterEllipsis"
+                                    TextWrapping="Wrap"
+                                    Visibility="{x:Bind HasDescription}" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+
+            <TextBlock
+                x:Name="StatusText"
+                Margin="12,24,12,0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                Style="{StaticResource SecondaryTextStyle}"
+                TextAlignment="Center"
+                TextWrapping="Wrap" />
+
+            <ProgressRing
+                Width="24"
+                Height="24"
+                Margin="0,24,0,0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}" />
+        </Grid>
+    </Grid>
+</Page>
