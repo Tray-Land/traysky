@@ -49,6 +49,9 @@ public sealed partial class SearchPage : Page
             return;
         }
 
+        if (StarterPackPage.TryOpenLink(query))
+            return;
+
         NavigationService.Instance.Navigate(typeof(SearchPage), SearchQueryPolicy.Normalize(query));
     }
 
@@ -179,7 +182,10 @@ public sealed partial class SearchPage : Page
             return;
         }
 
-        sender.Text = SearchQueryPolicy.Normalize(query);
+        if (StarterPackPage.TryOpenLink(query))
+            return;
+
+        sender.Text =SearchQueryPolicy.Normalize(query);
         ViewModel.Submit(query);
     }
 

@@ -8,7 +8,8 @@ public enum DeepLinkKind
     Profile,
     Post,
     Hashtag,
-    JoinGroup
+    JoinGroup,
+    StarterPack
 }
 
 /// <summary>What a <c>traysky:</c> link asks for. Only the fields its <see cref="Kind"/> uses are set.</summary>
@@ -16,6 +17,9 @@ public sealed record DeepLink(DeepLinkKind Kind, string Actor = "", string Rkey 
 {
     /// <summary>The AT URI of the post, for <see cref="DeepLinkKind.Post"/>.</summary>
     public string AtUri => $"at://{Actor}/app.bsky.feed.post/{Rkey}";
+
+    /// <summary>The AT URI of the pack, for <see cref="DeepLinkKind.StarterPack"/>.</summary>
+    public string StarterPackAtUri => StarterPackPolicy.ToAtUri(Actor, Rkey);
 }
 
 /// <summary>
@@ -30,6 +34,7 @@ public sealed record DeepLink(DeepLinkKind Kind, string Actor = "", string Rkey 
 /// <item><c>traysky:post/{handle-or-did}/{rkey}</c> or <c>traysky:post?uri=at://…</c> opens a post's thread.</item>
 /// <item><c>traysky:hashtag/{tag}</c> opens a hashtag search.</item>
 /// <item><c>traysky:join/{code}</c> previews a group chat's join link and offers to join it.</item>
+/// <item><c>traysky:starterpack/{handle-or-did}/{rkey}</c> or <c>traysky:starterpack?uri=at://…</c> opens a starter pack.</item>
 /// </list>
 /// The scheme is declared as a protocol in Package.appxmanifest; the two must agree.
 /// </remarks>
@@ -90,6 +95,21 @@ public static class DeepLinkPolicy
 
                 link = new DeepLink(DeepLinkKind.JoinGroup, Text: code);
                 return true;
+
+            case "starterpack" or "starter-pack" when segments.Length >= 3:
+                link = new DeepLink(DeepLinkKind.StarterPack, Actor: segments[1], Rkey: segments[2]);
+                return true;
+
+            case "starterpack" or "starter-pack":
+                string? packUri = StarterPackPolicy.AtUriFromLink(OAuthCallbackPolicy.GetQueryValue(uri, "uri"))
+                    ?? StarterPackPolicy.AtUriFromLink(OAuthCallbackPolicy.GetQueryValue(uri, "url"));
+                if (packUri is not null && BlueskyLinks.TryParseAtUri(packUri, out string packAuthority, out _, out string packRkey))
+                {
+                    link = new DeepLink(DeepLinkKind.StarterPack, Actor: packAuthority, Rkey: packRkey);
+                    return true;
+                }
+
+                return false;
 
             default:
                 return false;

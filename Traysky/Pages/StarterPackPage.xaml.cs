@@ -28,11 +28,35 @@ public sealed partial class StarterPackPage : Page
     /// <summary>Navigates to a starter pack's member list.</summary>
     public static void Open(StarterPackItem pack)
     {
-        if (pack.ListUri.Length == 0 && !PreviewMode.IsEnabled)
+        if (pack.ListUri.Length == 0 && pack.AtUri.Length == 0 && !PreviewMode.IsEnabled)
             return;
         NavigationService.Instance.Navigate(
             typeof(StarterPackPage),
-            new StarterPackArgs(pack.ListUri, pack.Name, pack.Description, pack.CreatorHandle, pack.WebUrl));
+            new StarterPackArgs(pack.ListUri, pack.Name, pack.Description, pack.CreatorHandle, pack.WebUrl, pack.AtUri));
+    }
+
+    /// <summary>Opens a pack from its AT URI alone (a pasted link or deep link); the page fetches the rest.</summary>
+    public static void OpenUri(string atUri)
+    {
+        if (atUri.Length == 0)
+            return;
+        NavigationService.Instance.Navigate(
+            typeof(StarterPackPage),
+            new StarterPackArgs(string.Empty, "Starter pack", string.Empty, string.Empty, string.Empty, atUri));
+    }
+
+    /// <summary>
+    /// Opens the pack when <paramref name="link"/> is a starter-pack link (bsky.app or AT URI) and returns
+    /// true; false leaves the caller to treat it as an ordinary link or query.
+    /// </summary>
+    public static bool TryOpenLink(string? link)
+    {
+        string? atUri = StarterPackPolicy.AtUriFromLink(link);
+        if (atUri is null)
+            return false;
+
+        OpenUri(atUri);
+        return true;
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)

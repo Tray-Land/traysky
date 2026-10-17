@@ -43,6 +43,48 @@
                             TextWrapping="Wrap"
                             Visibility="{x:Bind ViewModel.HasDescription, Mode=OneWay}" />
                     </StackPanel>
+                    <StackPanel Margin="12,0,12,8" Spacing="6">
+                        <StackPanel Spacing="2" Visibility="{x:Bind ViewModel.HasFeeds, Mode=OneWay}">
+                            <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="Feeds in this pack" />
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.Feeds}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="x:String">
+                                        <TextBlock Text="{x:Bind}" TextTrimming="CharacterEllipsis" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                        <Button
+                            Command="{x:Bind ViewModel.FollowAllCommand}"
+                            Content="{x:Bind ViewModel.FollowAllLabel, Mode=OneWay}"
+                            Style="{StaticResource AccentButtonStyle}"
+                            Visibility="{x:Bind ViewModel.ShowFollowAll, Mode=OneWay}" />
+                        <Grid ColumnSpacing="8" Visibility="{x:Bind ViewModel.IsFollowingAll, Mode=OneWay}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="4">
+                                <ProgressBar
+                                    IsIndeterminate="{x:Bind ViewModel.IsFollowTotalUnknown, Mode=OneWay}"
+                                    Maximum="{x:Bind ViewModel.FollowTotal, Mode=OneWay}"
+                                    Value="{x:Bind ViewModel.FollowDone, Mode=OneWay}" />
+                                <TextBlock
+                                    Style="{StaticResource SecondaryTextStyle}"
+                                    Text="{x:Bind ViewModel.FollowProgress, Mode=OneWay}" />
+                            </StackPanel>
+                            <Button
+                                Grid.Column="1"
+                                VerticalAlignment="Top"
+                                Command="{x:Bind ViewModel.FollowAllCancelCommand}"
+                                Content="Cancel" />
+                        </Grid>
+                        <TextBlock
+                            Style="{StaticResource SecondaryTextStyle}"
+                            Text="{x:Bind ViewModel.FollowSummary, Mode=OneWay}"
+                            TextWrapping="Wrap"
+                            Visibility="{x:Bind ViewModel.HasFollowSummary, Mode=OneWay}" />
+                    </StackPanel>
                     <InfoBar
                         Margin="12,0,12,8"
                         IsClosable="False"
