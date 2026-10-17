@@ -49,6 +49,8 @@ public sealed partial class ComposeBox : UserControl
         // right after - before the new box has loaded. PropertyChanged waits for Loaded, since
         // nothing it drives does anything until then.
         ViewModel.FocusRequested += OnFocusRequested;
+        ViewModel.RestoreConfirmationRequested += OnRestoreConfirmationRequested;
+        ViewModel.DraftRestored += OnDraftRestored;
         Loaded += ComposeBox_Loaded;
         RegisterPropertyChangedCallback(VisibilityProperty, (_, _) => UpdateLightDismissSuppression());
 
@@ -57,6 +59,8 @@ public sealed partial class ComposeBox : UserControl
         Unloaded += (_, _) =>
         {
             ViewModel.FocusRequested -= OnFocusRequested;
+            ViewModel.RestoreConfirmationRequested -= OnRestoreConfirmationRequested;
+            ViewModel.DraftRestored -= OnDraftRestored;
             ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
             _lightDismissSuppression?.Dispose();
             _lightDismissSuppression = null;
@@ -71,6 +75,10 @@ public sealed partial class ComposeBox : UserControl
         // double up.
         ViewModel.FocusRequested -= OnFocusRequested;
         ViewModel.FocusRequested += OnFocusRequested;
+        ViewModel.RestoreConfirmationRequested -= OnRestoreConfirmationRequested;
+        ViewModel.RestoreConfirmationRequested += OnRestoreConfirmationRequested;
+        ViewModel.DraftRestored -= OnDraftRestored;
+        ViewModel.DraftRestored += OnDraftRestored;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         UpdateLightDismissSuppression();
@@ -79,10 +87,34 @@ public sealed partial class ComposeBox : UserControl
         // inline box can be recycled by list virtualization, and the shared singleton VM's draft
         // may have changed to reflect a different post's reply while this instance was detached.
         if (!IsEditorReady)
+        {
+            // On a cold start (a traysky:compose link or a share launching the app) the editor's
+            // TextDocument is created a beat after Loaded, and the draft arrives before that.
+            SyncEditorWhenReady(attemptsLeft: 20);
             return;
+        }
 
         if (RichSuggestTextPolicy.StripTokenMarkup(CurrentEditorText()) != ViewModel.Text)
             SetEditorText(ViewModel.Text);
+    }
+
+    private void SyncEditorWhenReady(int attemptsLeft)
+    {
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (!IsLoaded)
+                return;
+
+            if (!IsEditorReady)
+            {
+                if (attemptsLeft > 1)
+                    SyncEditorWhenReady(attemptsLeft - 1);
+                return;
+            }
+
+            if (RichSuggestTextPolicy.StripTokenMarkup(CurrentEditorText()) != ViewModel.Text)
+                SetEditorText(ViewModel.Text);
+        });
     }
 
     /// <summary>
@@ -258,6 +290,66 @@ public sealed partial class ComposeBox : UserControl
         Editor.TextDocument.Selection.StartPosition = int.MaxValue;
         Editor.TextDocument.Selection.EndPosition = int.MaxValue;
     }
+
+    /// <summary>Opens the reply / quote controls. A reply has no reply controls (they belong to the thread's root), so it only gets the quote switch.</summary>
+    private async void Interaction_Click(object sender, RoutedEventArgs e)
+    {
+        if (XamlRoot is not { } root)
+            return;
+
+        bool isReply = ViewModel.ReplyTo is not null;
+        IReadOnlyList<ListItem> lists = [];
+        if (!isReply)
+            lists = (PreviewMode.IsEnabled ? PreviewMode.SampleLists() : await ListsService.GetOwnCurationListsAsync()) ?? [];
+
+        var answer = await Helpers.GateDialogs.AskAsync(root, isReply ? null : ViewModel.ReplySetting, ViewModel.AllowQuotes, lists);
+        if (answer is not { } chosen)
+            return;
+
+        if (chosen.Reply is not null)
+            ViewModel.ReplySetting = chosen.Reply;
+        ViewModel.AllowQuotes = chosen.AllowQuotes;
+    }
+
+    // The draft rows live in a flyout, outside the tree an ElementName binding to the root can reach, so they use click handlers.
+    private void OpenDraft_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DraftItem draft })
+            ViewModel.OpenDraftCommand.Execute(draft);
+    }
+
+    private void DeleteDraft_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DraftItem draft })
+            ViewModel.DeleteDraftCommand.Execute(draft);
+    }
+
+    private void DraftsFlyout_Opening(object? sender, object e)
+    {
+        if (ViewModel.RefreshDraftsCommand.CanExecute(null))
+            ViewModel.RefreshDraftsCommand.Execute(null);
+    }
+
+    /// <summary>Several boxes share the view model; only the one whose Drafts flyout is open should ask.</summary>
+    private async void OnRestoreConfirmationRequested(object? sender, DraftItem draft)
+    {
+        if (!DraftsFlyout.IsOpen || XamlRoot is not { } root)
+            return;
+
+        DraftsFlyout.Hide();
+        if (await Helpers.GateDialogs.ConfirmReplaceDraftAsync(root))
+            await ViewModel.RestoreDraftAsync(draft);
+    }
+
+    /// <summary>The flyout stays open when it has something to tell the user, such as media a draft couldn't bring back.</summary>
+    private void OnDraftRestored(object? sender, System.EventArgs e)
+    {
+        if (!ViewModel.HasDraftsStatus)
+            DraftsFlyout.Hide();
+    }
+
+    public Brush InteractionBrush(bool custom) =>
+        (Brush)Application.Current.Resources[custom ? "AccentTextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush"];
 
     public double EditorMinHeight(bool expanded) => expanded ? 72 : 32;
 

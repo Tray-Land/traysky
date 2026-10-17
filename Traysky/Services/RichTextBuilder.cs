@@ -9,7 +9,7 @@ namespace Traysky.Services;
 
 /// <summary>
 /// Fills a <see cref="RichTextBlock"/> with a post's segments: plain runs, and hyperlinks for
-/// links, mentions and tags that open in the browser.
+/// links that open in the browser, and mentions and tags that open inside the flyout.
 /// </summary>
 public static class RichTextBuilder
 {
@@ -58,9 +58,20 @@ public static class RichTextBuilder
                 };
                 ToolTipService.SetToolTip(link, "View profile");
             }
+            else if (segment.Kind == FacetKind.Tag)
+            {
+                // A hashtag opens its feed inside the flyout.
+                string tag = segment.Target;
+                link.Click += (_, _) =>
+                {
+                    System.Threading.Volatile.Write(ref _lastLinkClickTicks, Environment.TickCount64);
+                    Pages.HashtagPage.Open(tag);
+                };
+                ToolTipService.SetToolTip(link, "View #" + tag.TrimStart('#'));
+            }
             else
             {
-                string url = segment.Kind == FacetKind.Tag ? BlueskyLinks.HashtagUrl(segment.Target) : segment.Target;
+                string url = segment.Target;
                 link.Click += (_, _) =>
                 {
                     System.Threading.Volatile.Write(ref _lastLinkClickTicks, Environment.TickCount64);

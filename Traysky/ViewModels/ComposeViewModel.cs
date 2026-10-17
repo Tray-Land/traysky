@@ -5,6 +5,7 @@ using idunno.AtProto.Repo;
 using idunno.Bluesky;
 using idunno.Bluesky.Actor;
 using idunno.Bluesky.Embed;
+using idunno.Bluesky.Feed;
 using idunno.Bluesky.Video;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System;
@@ -41,6 +42,7 @@ public sealed partial class ComposeViewModel : ObservableObject
     {
         Text = SettingsService.ComposeDraft;
         IsExpanded = Text.Length > 0;
+        Drafts.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ShowNoDrafts));
         Attachments.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(HasAttachments));
@@ -48,6 +50,7 @@ public sealed partial class ComposeViewModel : ObservableObject
             OnPropertyChanged(nameof(ImageAttachmentCount));
             OnPropertyChanged(nameof(CanAttachImage));
             OnPropertyChanged(nameof(CanAttachVideo));
+            PostCommand.NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(HasLinkCard));
             OnPropertyChanged(nameof(HasLinkCardPlaceholder));
             PostCommand.NotifyCanExecuteChanged();
@@ -69,7 +72,43 @@ public sealed partial class ComposeViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasContext))]
     [NotifyPropertyChangedFor(nameof(ContextLabel))]
     [NotifyPropertyChangedFor(nameof(Placeholder))]
+    [NotifyPropertyChangedFor(nameof(InteractionSummary))]
+    [NotifyPropertyChangedFor(nameof(HasCustomInteraction))]
     public partial PostItem? ReplyTo { get; private set; }
+
+    /// <summary>Who may reply to the post being written. Only applies to a post that starts a thread; a reply uses its thread's.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(InteractionSummary))]
+    [NotifyPropertyChangedFor(nameof(HasCustomInteraction))]
+    public partial ReplyChoice ReplySetting { get; set; } = ReplyChoice.Everyone;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(InteractionSummary))]
+    [NotifyPropertyChangedFor(nameof(HasCustomInteraction))]
+    public partial bool AllowQuotes { get; set; } = true;
+
+    /// <summary>"Anyone can reply · Quotes allowed": shown on the compose box's settings button.</summary>
+    public string InteractionSummary => InteractionGatePolicy.Summary(ReplySetting, AllowQuotes, ReplyTo is not null);
+
+    /// <summary>Whether the controls differ from the defaults, so the button can stand out.</summary>
+    public bool HasCustomInteraction => !InteractionGatePolicy.IsDefault(ReplyTo is null ? ReplySetting : ReplyChoice.Everyone, AllowQuotes);
+
+    /// <summary>The draft the box was restored from, so saving again updates it and posting removes it.</summary>
+    private TimestampIdentifier? _draftId;
+
+    public ObservableCollection<DraftItem> Drafts { get; } = [];
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowNoDrafts))]
+    public partial bool IsLoadingDrafts { get; private set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDraftsStatus))]
+    public partial string? DraftsStatus { get; private set; }
+
+    public bool HasDraftsStatus => !string.IsNullOrEmpty(DraftsStatus);
+
+    public bool ShowNoDrafts => !IsLoadingDrafts && Drafts.Count == 0;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasContext))]
@@ -346,27 +385,7 @@ public sealed partial class ComposeViewModel : ObservableObject
             reader.DetachStream();
         }
 
-        string? sizeError = ComposeAttachmentPolicy.ValidateSize(ComposeAttachmentKind.Image, bytes.Length);
-        if (sizeError is not null)
-        {
-            Error = sizeError;
-            return;
-        }
-
-        encodedStream.Seek(0);
-        var thumbnail = new BitmapImage();
-        await thumbnail.SetSourceAsync(encodedStream);
-
-        Attachments.Add(new ComposeAttachmentItem
-        {
-            Bytes = bytes,
-            MimeType = "image/png",
-            FileName = $"pasted-{DateTime.Now:yyyyMMddHHmmss}.png",
-            Kind = ComposeAttachmentKind.Image,
-            PixelWidth = (int)decoder.PixelWidth,
-            PixelHeight = (int)decoder.PixelHeight,
-            Thumbnail = thumbnail
-        });
+        await AddImageBytesAsync(bytes, "image/png", $"pasted-{DateTime.Now:yyyyMMddHHmmss}.png");
     }
 
     private async Task AddImageAsync(StorageFile file)
@@ -379,12 +398,37 @@ public sealed partial class ComposeViewModel : ObservableObject
             return;
         }
 
-        byte[] bytes = await ReadAllBytesAsync(file);
-        string? sizeError = ComposeAttachmentPolicy.ValidateSize(ComposeAttachmentKind.Image, bytes.Length);
-        if (sizeError is not null)
+        await AddImageBytesAsync(await ReadAllBytesAsync(file), mimeType, file.Name);
+    }
+
+    /// <summary>
+    /// Adds an image, shrinking it first if it's over the blob limit: a gentle pass that keeps every
+    /// pixel runs automatically; if that isn't enough the image is added flagged as oversized, with a
+    /// Compress button that applies the lossy ladder. Animated GIFs can't be re-encoded, so they are rejected.
+    /// </summary>
+    private async Task AddImageBytesAsync(byte[] bytes, string mimeType, string fileName)
+    {
+        bool oversized = ComposeAttachmentPolicy.ValidateSize(ComposeAttachmentKind.Image, bytes.Length) is not null;
+        int? width = null, height = null;
+
+        if (oversized)
         {
-            Error = sizeError;
-            return;
+            if (!ImageCompressionPolicy.CanCompress(mimeType))
+            {
+                Error = ComposeAttachmentPolicy.ValidateSize(ComposeAttachmentKind.Image, bytes.Length);
+                return;
+            }
+
+            CompressedImage? gentle = await TryCompressAsync(bytes, ImageCompressionPolicy.GentleSteps);
+            if (gentle is not null)
+            {
+                bytes = gentle.Bytes;
+                mimeType = "image/jpeg";
+                fileName = Path.ChangeExtension(fileName, ".jpg");
+                width = gentle.Width;
+                height = gentle.Height;
+                oversized = false;
+            }
         }
 
         using InMemoryRandomAccessStream memoryStream = await ToInMemoryStreamAsync(bytes);
@@ -398,12 +442,62 @@ public sealed partial class ComposeViewModel : ObservableObject
         {
             Bytes = bytes,
             MimeType = mimeType,
-            FileName = file.Name,
+            FileName = fileName,
             Kind = ComposeAttachmentKind.Image,
-            PixelWidth = (int)decoder.PixelWidth,
-            PixelHeight = (int)decoder.PixelHeight,
-            Thumbnail = thumbnail
+            PixelWidth = width ?? (int)decoder.PixelWidth,
+            PixelHeight = height ?? (int)decoder.PixelHeight,
+            Thumbnail = thumbnail,
+            IsOversized = oversized
         });
+    }
+
+    private static async Task<CompressedImage?> TryCompressAsync(byte[] bytes, IReadOnlyList<ImageCompressionPolicy.Step> steps)
+    {
+        try
+        {
+            return await ImageCompressor.TryCompressAsync(bytes, steps, ComposeAttachmentPolicy.MaxImageBytes);
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("Compose", $"Image compression threw: {ex.Message}");
+            return null;
+        }
+    }
+
+    [RelayCommand]
+    private async Task CompressAttachmentAsync(ComposeAttachmentItem attachment)
+    {
+        int index = Attachments.IndexOf(attachment);
+        if (index < 0)
+            return;
+
+        Error = null;
+        CompressedImage? result = await TryCompressAsync(attachment.Bytes, ImageCompressionPolicy.LossySteps);
+        if (result is null)
+        {
+            Error = "Couldn't shrink this image enough. Try a smaller one.";
+            return;
+        }
+
+        index = Attachments.IndexOf(attachment); // the list may have changed while compressing
+        if (index < 0)
+            return;
+
+        using InMemoryRandomAccessStream memoryStream = await ToInMemoryStreamAsync(result.Bytes);
+        var thumbnail = new BitmapImage();
+        await thumbnail.SetSourceAsync(memoryStream);
+
+        Attachments[index] = new ComposeAttachmentItem
+        {
+            Bytes = result.Bytes,
+            MimeType = "image/jpeg",
+            FileName = Path.ChangeExtension(attachment.FileName, ".jpg"),
+            Kind = ComposeAttachmentKind.Image,
+            PixelWidth = result.Width,
+            PixelHeight = result.Height,
+            Thumbnail = thumbnail,
+            AltText = attachment.AltText
+        };
     }
 
     private async Task AddVideoAsync(StorageFile file)
@@ -433,7 +527,7 @@ public sealed partial class ComposeViewModel : ObservableObject
         });
     }
 
-    private static async Task<byte[]> ReadAllBytesAsync(StorageFile file)
+    internal static async Task<byte[]> ReadAllBytesAsync(StorageFile file)
     {
         using IRandomAccessStream stream = await file.OpenReadAsync();
         var bytes = new byte[stream.Size];
@@ -443,7 +537,7 @@ public sealed partial class ComposeViewModel : ObservableObject
         return bytes;
     }
 
-    private static async Task<InMemoryRandomAccessStream> ToInMemoryStreamAsync(byte[] bytes)
+    internal static async Task<InMemoryRandomAccessStream> ToInMemoryStreamAsync(byte[] bytes)
     {
         var stream = new InMemoryRandomAccessStream();
         using (var writer = new DataWriter(stream))
@@ -648,7 +742,197 @@ public sealed partial class ComposeViewModel : ObservableObject
         }
     }
 
-    private bool CanPost() => !IsPosting && (PostTextPolicy.CanPost(Text) || (HasAttachments && !PostTextPolicy.IsOverLimit(Text)));
+    [RelayCommand]
+    private async Task RefreshDraftsAsync()
+    {
+        if (IsLoadingDrafts)
+            return;
+
+        IsLoadingDrafts = true;
+        DraftsStatus = null;
+        try
+        {
+            List<DraftItem>? drafts = PreviewMode.IsEnabled ? PreviewMode.SampleDrafts() : await DraftsService.GetAllAsync();
+            if (drafts is null)
+            {
+                DraftsStatus = BlueskySessionService.Instance.IsSignedIn ? "Couldn't load your drafts. Try again in a moment." : "Sign in to use drafts.";
+                return;
+            }
+
+            Drafts.Clear();
+            foreach (DraftItem draft in drafts)
+                Drafts.Add(draft);
+        }
+        finally
+        {
+            IsLoadingDrafts = false;
+        }
+    }
+
+    /// <summary>Saves what's in the box as a draft (updating the one it was restored from) and leaves the box as it is.</summary>
+    [RelayCommand]
+    private Task SaveDraftAsync() => SaveDraftCoreAsync(clearAfter: false);
+
+    /// <summary>Saves the draft and empties the box, for setting a post aside. Refuses while media is attached, since a draft can't hold it.</summary>
+    [RelayCommand]
+    private Task SaveDraftAndClearAsync() => SaveDraftCoreAsync(clearAfter: true);
+
+    private async Task SaveDraftCoreAsync(bool clearAfter)
+    {
+        DraftsStatus = null;
+
+        if (!BlueskySessionService.Instance.IsSignedIn)
+        {
+            DraftsStatus = "Sign in to save drafts.";
+            return;
+        }
+
+        if (!DraftPolicy.HasStorableContent(Text, QuoteOf is not null))
+        {
+            DraftsStatus = "Write something first. A draft needs some text or a quoted post.";
+            return;
+        }
+
+        if (clearAfter && HasAttachments)
+        {
+            DraftsStatus = "Remove the attached media first, or use Save draft: a draft can't hold images or video.";
+            return;
+        }
+
+        string text = Text.Trim();
+        StrongReference? quote = QuoteOf?.Reference;
+        ReplyChoice reply = ReplyTo is null ? ReplySetting : ReplyChoice.Everyone;
+
+        bool saved;
+        if (PreviewMode.IsEnabled)
+            saved = true;
+        else if (_draftId is { } existing)
+            saved = await DraftsService.UpdateAsync(existing, text, quote, reply, AllowQuotes);
+        else
+        {
+            _draftId = await DraftsService.CreateAsync(text, quote, reply, AllowQuotes);
+            saved = _draftId is not null;
+        }
+
+        if (!saved)
+        {
+            DraftsStatus = "Couldn't save the draft. What you wrote is still here.";
+            return;
+        }
+
+        string? note = DraftPolicy.SaveNote(ImageAttachmentCount, HasVideoAttachment, ReplyTo is not null);
+
+        if (clearAfter)
+        {
+            _draftId = null;
+            Text = string.Empty;
+            ReplyTo = null;
+            QuoteOf = null;
+            ReplySetting = ReplyChoice.Everyone;
+            AllowQuotes = true;
+            IsExpanded = false;
+        }
+
+        await RefreshDraftsAsync();
+        DraftsStatus = note is null ? "Draft saved." : $"Draft saved. {note}";
+    }
+
+    /// <summary>Raised when opening a draft would overwrite what's in the box; the view that has the Drafts flyout open asks, then calls <see cref="RestoreDraftAsync"/>.</summary>
+    public event EventHandler<DraftItem>? RestoreConfirmationRequested;
+
+    [RelayCommand]
+    private async Task OpenDraftAsync(DraftItem draft)
+    {
+        // Restoring the draft the box already came from loses nothing, so only other content needs a say-so.
+        bool wouldOverwrite = PostTextPolicy.HasDraftContent(Text, Attachments.Count)
+            && !(draft.Id is not null && Equals(draft.Id, _draftId) && draft.Text == Text.Trim());
+
+        if (wouldOverwrite && RestoreConfirmationRequested is not null)
+        {
+            RestoreConfirmationRequested(this, draft);
+            return;
+        }
+
+        await RestoreDraftAsync(draft);
+    }
+
+    /// <summary>Loads a draft into the box, replacing what's there. A draft that quoted a post that has since gone loses only the quote.</summary>
+    public async Task RestoreDraftAsync(DraftItem draft)
+    {
+        DraftsStatus = null;
+
+        PostItem? quote = null;
+        if (draft.Quote is { } reference && !PreviewMode.IsEnabled)
+        {
+            quote = await FetchPostAsync(reference.Uri);
+            if (quote is null)
+                DraftsStatus = "The post this draft quoted couldn't be loaded, so the quote was left out.";
+        }
+
+        ReplyTo = null;
+        QuoteOf = quote;
+        Text = draft.Text;
+        ReplySetting = draft.Reply;
+        AllowQuotes = draft.AllowQuotes;
+        _draftId = draft.Id;
+        IsExpanded = true;
+        Error = null;
+
+        if (DraftsStatus is null && draft.HasNote)
+            DraftsStatus = draft.Note;
+
+        DraftRestored?.Invoke(this, EventArgs.Empty);
+        FocusRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Raised once a draft is in the box, so the Drafts flyout can close.</summary>
+    public event EventHandler? DraftRestored;
+
+    [RelayCommand]
+    private async Task DeleteDraftAsync(DraftItem draft)
+    {
+        int index = Drafts.IndexOf(draft);
+        if (index < 0)
+            return;
+
+        DraftsStatus = null;
+        Drafts.RemoveAt(index);
+
+        if (draft.Id is not { } id || PreviewMode.IsEnabled)
+            return;
+
+        if (await DraftsService.DeleteAsync(id))
+        {
+            if (Equals(_draftId, id))
+                _draftId = null;
+            return;
+        }
+
+        Drafts.Insert(Math.Min(index, Drafts.Count), draft);
+        DraftsStatus = "Couldn't delete the draft. Try again in a moment.";
+    }
+
+    private static async Task<PostItem?> FetchPostAsync(AtUri uri)
+    {
+        try
+        {
+            await LabelService.Instance.EnsureLoadedAsync();
+            AtProtoHttpResult<IReadOnlyCollection<PostView>> posts =
+                await BlueskySessionService.Instance.Agent.GetPosts([uri], LabelService.Instance.Subscribed);
+
+            PostView? post = posts.Succeeded ? posts.Result?.FirstOrDefault() : null;
+            return post is null ? null : FeedMapper.ToPostItem(post);
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("Compose", $"Fetching a draft's quoted post failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    private bool CanPost() => !IsPosting
+        && !Attachments.Any(a => a.IsOversized)
+        && (PostTextPolicy.CanPost(Text) || (HasAttachments && !PostTextPolicy.IsOverLimit(Text)));
 
     [RelayCommand(CanExecute = nameof(CanPost))]
     private async Task PostAsync()
@@ -740,13 +1024,32 @@ public sealed partial class ComposeViewModel : ObservableObject
                 if (QuoteOf is not null)
                     QuoteOf.RepostCount = QuoteOf.RepostCount; // quotes are counted separately; leave as-is
 
+                // The gates are separate records keyed to the new post, so they follow the post going through.
+                // A reply has no reply controls of its own: they belong to the thread's root.
+                bool gatesApplied = true;
+                string? newPostUri = result.Result?.Uri.ToString();
+                if (newPostUri is not null && !InteractionGatePolicy.IsDefault(ReplyTo is null ? ReplySetting : ReplyChoice.Everyone, AllowQuotes))
+                    gatesApplied = await GatesService.ApplyToNewPostAsync(newPostUri, ReplyTo is null ? ReplySetting : null, AllowQuotes);
+
                 Text = string.Empty;
                 ReplyTo = null;
                 QuoteOf = null;
                 Attachments.Clear();
+                ReplySetting = ReplyChoice.Everyone;
+                AllowQuotes = true;
                 IsExpanded = false;
                 PostedCount++;
                 Posted?.Invoke(this, EventArgs.Empty);
+
+                // The draft this post grew from has served its purpose.
+                if (_draftId is { } sentDraft)
+                {
+                    _draftId = null;
+                    _ = DraftsService.DeleteAsync(sentDraft);
+                }
+
+                if (!gatesApplied)
+                    Error = "Posted, but the reply or quote settings didn't apply. Use \"Reply and quote settings\" on the post to try again.";
                 return;
             }
 

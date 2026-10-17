@@ -55,6 +55,18 @@
                             Glyph="&#xE768;"
                             Visibility="{x:Bind helpers:BindHelpers.VisibleIf(IsVideo)}" />
                         <Button
+                            Margin="4"
+                            Padding="4,2"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Bottom"
+                            Command="{Binding ElementName=Root, Path=ViewModel.CompressAttachmentCommand}"
+                            CommandParameter="{x:Bind}"
+                            Content="Compress"
+                            FontSize="11"
+                            Style="{StaticResource AccentButtonStyle}"
+                            ToolTipService.ToolTip="Too large for Bluesky (about 1 MB max). Shrinks the image, losing some quality."
+                            Visibility="{x:Bind helpers:BindHelpers.VisibleIf(IsOversized)}" />
+                        <Button
                             Width="22"
                             Height="22"
                             Margin="2"
@@ -80,6 +92,43 @@
                         Text="{x:Bind AltText, Mode=TwoWay}" />
                 </StackPanel>
             </Border>
+        </DataTemplate>
+        <DataTemplate x:Key="DraftTemplate" x:DataType="items:DraftItem">
+            <Grid ColumnSpacing="4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Button
+                    HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Left"
+                    Click="OpenDraft_Click"
+                    Tag="{x:Bind}">
+                    <StackPanel Spacing="2">
+                        <TextBlock
+                            MaxLines="2"
+                            Text="{x:Bind Preview}"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="Wrap" />
+                        <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Age}" />
+                        <TextBlock
+                            Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                            Style="{StaticResource SecondaryTextStyle}"
+                            Text="{x:Bind Note}"
+                            TextWrapping="Wrap"
+                            Visibility="{x:Bind helpers:BindHelpers.VisibleIf(HasNote)}" />
+                    </StackPanel>
+                </Button>
+                <Button
+                    Grid.Column="1"
+                    VerticalAlignment="Top"
+                    Click="DeleteDraft_Click"
+                    Tag="{x:Bind}"
+                    Style="{StaticResource PostActionButtonStyle}"
+                    ToolTipService.ToolTip="Delete draft">
+                    <FontIcon FontSize="12" Glyph="&#xE74D;" />
+                </Button>
+            </Grid>
         </DataTemplate>
     </UserControl.Resources>
 
@@ -227,6 +276,8 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
@@ -247,20 +298,73 @@
                     ToolTipService.ToolTip="Add video">
                     <FontIcon FontSize="14" Glyph="&#xE714;" />
                 </Button>
-                <TextBlock
+                <Button
                     Grid.Column="2"
+                    Click="Interaction_Click"
+                    Foreground="{x:Bind InteractionBrush(ViewModel.HasCustomInteraction), Mode=OneWay}"
+                    Style="{StaticResource PostActionButtonStyle}"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.InteractionSummary, Mode=OneWay}">
+                    <FontIcon FontSize="14" Glyph="&#xE72E;" />
+                </Button>
+                <Button
+                    Grid.Column="3"
+                    Style="{StaticResource PostActionButtonStyle}"
+                    ToolTipService.ToolTip="Drafts">
+                    <FontIcon FontSize="14" Glyph="&#xE70B;" />
+                    <Button.Flyout>
+                        <Flyout x:Name="DraftsFlyout" Opening="DraftsFlyout_Opening" Placement="TopEdgeAlignedLeft">
+                            <StackPanel Width="300" Spacing="8">
+                                <Grid ColumnSpacing="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button
+                                        HorizontalAlignment="Stretch"
+                                        Command="{x:Bind ViewModel.SaveDraftCommand}"
+                                        Content="Save draft" />
+                                    <Button
+                                        Grid.Column="1"
+                                        HorizontalAlignment="Stretch"
+                                        Command="{x:Bind ViewModel.SaveDraftAndClearCommand}"
+                                        Content="Save and clear"
+                                        ToolTipService.ToolTip="Saves the draft and empties the box" />
+                                </Grid>
+                                <TextBlock
+                                    Style="{StaticResource SecondaryTextStyle}"
+                                    Text="{x:Bind ViewModel.DraftsStatus, Mode=OneWay}"
+                                    TextWrapping="Wrap"
+                                    Visibility="{x:Bind ViewModel.HasDraftsStatus, Mode=OneWay}" />
+                                <ProgressBar IsIndeterminate="True" Visibility="{x:Bind ViewModel.IsLoadingDrafts, Mode=OneWay}" />
+                                <TextBlock
+                                    Style="{StaticResource SecondaryTextStyle}"
+                                    Text="No saved drafts"
+                                    Visibility="{x:Bind ViewModel.ShowNoDrafts, Mode=OneWay}" />
+                                <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto">
+                                    <ItemsRepeater ItemTemplate="{StaticResource DraftTemplate}" ItemsSource="{x:Bind ViewModel.Drafts}">
+                                        <ItemsRepeater.Layout>
+                                            <StackLayout Orientation="Vertical" Spacing="4" />
+                                        </ItemsRepeater.Layout>
+                                    </ItemsRepeater>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+                <TextBlock
+                    Grid.Column="4"
                     VerticalAlignment="Center"
                     Style="{StaticResource SecondaryTextStyle}"
                     Text="{x:Bind StatusText(ViewModel.UploadStatus), Mode=OneWay}"
                     TextTrimming="CharacterEllipsis" />
                 <TextBlock
-                    Grid.Column="3"
+                    Grid.Column="5"
                     VerticalAlignment="Center"
                     FontSize="12"
                     Foreground="{x:Bind CounterBrush(ViewModel.IsNearLimit, ViewModel.IsOverLimit), Mode=OneWay}"
                     Text="{x:Bind ViewModel.Counter, Mode=OneWay}" />
                 <Button
-                    Grid.Column="4"
+                    Grid.Column="6"
                     MinWidth="64"
                     Command="{x:Bind ViewModel.PostCommand}"
                     Style="{StaticResource AccentButtonStyle}">

@@ -21,6 +21,9 @@ public sealed partial class ComposeAttachmentItem : ObservableObject
     /// <summary>Null for video — no frame is extracted, the UI just shows a video glyph.</summary>
     public BitmapImage? Thumbnail { get; init; }
 
+    /// <summary>Over Bluesky's image size limit and not yet shrunk; the post can't be sent until it is compressed or removed.</summary>
+    public bool IsOversized { get; init; }
+
     [ObservableProperty]
     public partial string AltText { get; set; } = string.Empty;
 
