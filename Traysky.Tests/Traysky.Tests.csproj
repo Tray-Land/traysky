@@ -30,6 +30,7 @@
     <Compile Include="..\Traysky\Services\RelativeTimeFormatter.cs" Link="Services\RelativeTimeFormatter.cs" />
     <Compile Include="..\Traysky\Services\PostTextPolicy.cs" Link="Services\PostTextPolicy.cs" />
     <Compile Include="..\Traysky\Services\HashtagFacetPolicy.cs" Link="Services\HashtagFacetPolicy.cs" />
+    <Compile Include="..\Traysky\Services\PopoutPlacementPolicy.cs" Link="Services\PopoutPlacementPolicy.cs" />
     <Compile Include="..\Traysky\Services\UnreadBadgePolicy.cs" Link="Services\UnreadBadgePolicy.cs" />
     <Compile Include="..\Traysky\Services\NotificationGroupingPolicy.cs" Link="Services\NotificationGroupingPolicy.cs" />
     <Compile Include="..\Traysky\Services\BlueskyLinks.cs" Link="Services\BlueskyLinks.cs" />

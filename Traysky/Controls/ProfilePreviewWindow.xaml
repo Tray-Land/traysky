@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ex:WindowEx
+    x:Class="Traysky.Controls.ProfilePreviewWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:ex="using:WinUIEx"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="Profile"
+    MinWidth="320"
+    MinHeight="360"
+    mc:Ignorable="d">
+
+    <ex:WindowEx.SystemBackdrop>
+        <MicaBackdrop />
+    </ex:WindowEx.SystemBackdrop>
+
+    <Grid RowDefinitions="Auto,*">
+
+        <!--  Custom title bar: Mica shows through, the system caption buttons stay at the right  -->
+        <Grid
+            x:Name="AppTitleBar"
+            Height="40"
+            Padding="6,0,140,0"
+            ColumnSpacing="6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Button
+                x:Name="BackButton"
+                Width="32"
+                Height="32"
+                Padding="0"
+                Background="Transparent"
+                BorderThickness="0"
+                Click="BackButton_Click"
+                ToolTipService.ToolTip="Back"
+                Visibility="Collapsed">
+                <FontIcon FontSize="14" Glyph="&#xE72B;" />
+            </Button>
+            <TextBlock
+                Grid.Column="1"
+                Margin="10,0,0,0"
+                VerticalAlignment="Center"
+                FontSize="12"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="Reviewing profile" />
+        </Grid>
+
+        <Frame x:Name="ContentFrame" Grid.Row="1" />
+    </Grid>
+</ex:WindowEx>

@@ -22,6 +22,22 @@
             </Grid>
         </DataTemplate>
 
+        <!--  Contained mode (the compose box's profile review window): the same card, read-only and
+              with its navigation kept inside the window. See PostCard.IsContained.  -->
+        <DataTemplate x:Key="ContainedPostRowTemplate" x:DataType="items:PostItem">
+            <Grid>
+                <controls:PostCard
+                    IsContained="True"
+                    IsOpenable="False"
+                    Post="{x:Bind}"
+                    ProfileRequested="ContainedPost_ProfileRequested" />
+                <Rectangle
+                    Height="1"
+                    VerticalAlignment="Bottom"
+                    Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+            </Grid>
+        </DataTemplate>
+
         <!--  Feeds open on bsky.app, like the Explore suggestions.  -->
         <DataTemplate x:Key="FeedRowTemplate" x:DataType="items:FeedSuggestionItem">
             <Grid
@@ -219,7 +235,7 @@
                             <Button
                                 Command="{x:Bind ViewModel.MessageCommand}"
                                 ToolTipService.ToolTip="Message"
-                                Visibility="{x:Bind ViewModel.CanMessage, Mode=OneWay}">
+                                Visibility="{x:Bind VisibleUnlessContained(ViewModel.CanMessage, IsContained), Mode=OneWay}">
                                 <FontIcon FontSize="14" Glyph="&#xE8BD;" />
                             </Button>
                             <Button
@@ -296,7 +312,7 @@
                             VerticalAlignment="Bottom"
                             Orientation="Horizontal"
                             Spacing="6"
-                            Visibility="{x:Bind ViewModel.IsSelf, Mode=OneWay}">
+                            Visibility="{x:Bind VisibleUnlessContained(ViewModel.IsSelf, IsContained), Mode=OneWay}">
                             <Button Click="NewList_Click" ToolTipService.ToolTip="New list">
                                 <FontIcon FontSize="14" Glyph="&#xE8FD;" />
                             </Button>
@@ -416,7 +432,7 @@
                             Padding="0"
                             Click="KnownFollowers_Click"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Visibility="{x:Bind ViewModel.HasKnownFollowers, Mode=OneWay}">
+                            Visibility="{x:Bind VisibleUnlessContained(ViewModel.HasKnownFollowers, IsContained), Mode=OneWay}">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <ItemsControl ItemsSource="{x:Bind ViewModel.KnownFollowers}">
                                     <ItemsControl.ItemsPanel>
@@ -517,10 +533,16 @@
                         <SelectorBarItem
                             x:Name="LikesTab"
                             Text="Likes"
-                            Visibility="{x:Bind ViewModel.IsSelf, Mode=OneWay}" />
+                            Visibility="{x:Bind VisibleUnlessContained(ViewModel.IsSelf, IsContained), Mode=OneWay}" />
                         <SelectorBarItem x:Name="FeedsTab" Text="Feeds" />
-                        <SelectorBarItem x:Name="PacksTab" Text="Starter packs" />
-                        <SelectorBarItem x:Name="ListsTab" Text="Lists" />
+                        <SelectorBarItem
+                            x:Name="PacksTab"
+                            Text="Starter packs"
+                            Visibility="{x:Bind helpers:BindHelpers.CollapsedIf(IsContained), Mode=OneWay}" />
+                        <SelectorBarItem
+                            x:Name="ListsTab"
+                            Text="Lists"
+                            Visibility="{x:Bind helpers:BindHelpers.CollapsedIf(IsContained), Mode=OneWay}" />
                     </SelectorBar>
 
                     <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />

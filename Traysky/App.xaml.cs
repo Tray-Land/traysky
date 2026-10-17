@@ -280,6 +280,10 @@ public partial class App : Application
                 ShowFlyout(ShellDestination.Home, () => Pages.HashtagPage.Open(link.Text));
                 break;
 
+            case DeepLinkKind.StarterPack:
+                ShowFlyout(ShellDestination.Home, () => Pages.StarterPackPage.OpenUri(link.StarterPackAtUri));
+                break;
+
             case DeepLinkKind.JoinGroup:
                 ShowFlyout(ShellDestination.Messages, () =>
                 {
@@ -419,6 +423,9 @@ public partial class App : Application
     }
 
     public void HideFlyout() => _trayPopupWindow?.HidePopup();
+
+    /// <summary>Where the tray popup rests, or null before it has been created.</summary>
+    public PixelRect? PopupBounds => _trayPopupWindow?.RestingBounds;
 
     private void EnsurePopupWindow()
     {
@@ -667,6 +674,7 @@ public partial class App : Application
 
             _trayPopupWindow?.Close();
             VideoPopoutWindow.CloseCurrent();
+            ProfilePreviewWindow.CloseCurrent();
 
             if (_trayIcon is not null)
             {

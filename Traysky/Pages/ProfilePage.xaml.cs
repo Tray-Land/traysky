@@ -10,11 +10,36 @@ using Traysky.ViewModels.Items;
 
 namespace Traysky.Pages;
 
+/// <summary>Navigation parameter that puts <see cref="ProfilePage"/> in its contained mode, for <paramref name="Actor"/> (a DID or handle).</summary>
+public sealed record ContainedProfileRequest(string Actor);
+
 /// <summary>
 /// An account's profile and recent posts. Navigation parameter is a DID or handle.
 /// </summary>
 public sealed partial class ProfilePage : Page
 {
+    /// <summary>
+    /// True when the page is hosted in its own window's frame (see
+    /// <see cref="Controls.ProfilePreviewWindow"/>) rather than the tray popup's. Set by
+    /// navigating with a <see cref="ContainedProfileRequest"/>. A contained page must never reach
+    /// the popup's <see cref="NavigationService"/>, the shared compose draft or the popup's
+    /// overlays, so its post cards are contained too (see <see cref="Controls.PostCard.IsContained"/>),
+    /// it hides the actions that would (messages, lists, settings, thread and follower pages,
+    /// starter packs) and sends the rest to bsky.app or to its own frame.
+    /// </summary>
+    public static readonly DependencyProperty IsContainedProperty =
+        DependencyProperty.Register(nameof(IsContained), typeof(bool), typeof(ProfilePage), new PropertyMetadata(false));
+
+    public bool IsContained
+    {
+        get => (bool)GetValue(IsContainedProperty);
+        private set => SetValue(IsContainedProperty, value);
+    }
+
+    /// <summary>x:Bind can't nest function calls, so this folds "show unless contained" into one.</summary>
+    public Visibility VisibleUnlessContained(bool value, bool contained) =>
+        value && !contained ? Visibility.Visible : Visibility.Collapsed;
+
     private ScrollViewer? _scrollViewer;
 
     public ProfileViewModel ViewModel { get; } = new();
@@ -116,9 +141,18 @@ public sealed partial class ProfilePage : Page
     private async void AddToList_Click(object sender, RoutedEventArgs e) =>
         await Helpers.ListDialogs.ShowMembershipAsync(XamlRoot, ViewModel.ActorKey, ViewModel.Handle);
 
+    private void ContainedPost_ProfileRequested(object? sender, string did) =>
+        Frame?.Navigate(typeof(ProfilePage), new ContainedProfileRequest(did));
+
     private void SimilarRow_Tapped(object sender, TappedRoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: ActorItem actor })
+        if (sender is not FrameworkElement { DataContext: ActorItem actor })
+            return;
+
+        // A contained page keeps going inside its own frame, so its window gets a back stack.
+        if (IsContained)
+            Frame?.Navigate(typeof(ProfilePage), new ContainedProfileRequest(actor.ProfileKey.TrimStart('@')));
+        else
             Open(actor.ProfileKey);
     }
 
@@ -138,8 +172,20 @@ public sealed partial class ProfilePage : Page
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
-        if (e.Parameter is string actor)
+
+        if (e.Parameter is ContainedProfileRequest request)
+        {
+            IsContained = true;
+
+            // Before anything loads, so no row is ever realized as a full PostCard.
+            ((Helpers.ProfileRowTemplateSelector)Resources["RowSelector"]).PostTemplate = (DataTemplate)Resources["ContainedPostRowTemplate"];
+            PostList.ItemTemplateSelector = (Helpers.ProfileRowTemplateSelector)Resources["RowSelector"];
+            _ = ViewModel.LoadAsync(request.Actor);
+        }
+        else if (e.Parameter is string actor)
+        {
             _ = ViewModel.LoadAsync(actor);
+        }
     }
 
     public bool AnyLoading(bool a, bool b) => a || b;
@@ -199,8 +245,16 @@ public sealed partial class ProfilePage : Page
 
     private void FollowingButton_Click(object sender, RoutedEventArgs e) => OpenFollowList(showFollowing: true);
 
-    private void OpenFollowList(bool showFollowing) =>
+    private void OpenFollowList(bool showFollowing)
+    {
+        if (IsContained)
+        {
+            _ = RichTextBuilder.OpenAsync($"https://bsky.app/profile/{ViewModel.ActorKey}/{(showFollowing ? "follows" : "followers")}");
+            return;
+        }
+
         FollowListPage.Open(ViewModel.ActorKey, showFollowing, ViewModel.FollowersCount, ViewModel.FollowsCount);
+    }
 
     private void PostCard_ThreadRequested(object? sender, PostItem post) => PostPage.Open(post);
 

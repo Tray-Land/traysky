@@ -215,6 +215,9 @@ public sealed partial class TrayPopupWindow : WindowEx
         DispatcherQueue.TryEnqueue(() => _shellPage?.RefreshTitleBarActivation());
     }
 
+    /// <summary>Where the popup rests once its slide animation settles, in physical pixels.</summary>
+    public PixelRect RestingBounds => new(_baseX, _baseY, AppWindow.Size.Width, AppWindow.Size.Height);
+
     public void HidePopup()
     {
         _hideTimer.Stop();
