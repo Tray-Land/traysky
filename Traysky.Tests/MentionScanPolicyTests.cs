@@ -1,20 +1,23 @@
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Linq;
 using Traysky.Services;
 
 namespace Traysky.Tests;
 
+[TestClass]
 public class MentionScanPolicyTests
 {
-    [Fact]
+    [TestMethod]
     public void FindsDistinctHandlesInOrder() =>
-        Assert.Equal(["a.bsky.social", "b-c.example.com"], MentionScanPolicy.Handles("hi @a.bsky.social and (@b-c.example.com) @A.bsky.social"));
+        CollectionAssert.AreEqual(new[] { "a.bsky.social", "b-c.example.com" }, MentionScanPolicy.Handles("hi @a.bsky.social and (@b-c.example.com) @A.bsky.social").ToList());
 
-    [Theory]
-    [InlineData("")]
-    [InlineData("mail me@foo.com")]
-    [InlineData("@nodots")]
-    public void NonMentionsAreIgnored(string text) => Assert.Empty(MentionScanPolicy.Handles(text));
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("mail me@foo.com")]
+    [DataRow("@nodots")]
+    public void NonMentionsAreIgnored(string text) => Assert.IsEmpty(MentionScanPolicy.Handles(text));
 
-    [Fact]
+    [TestMethod]
     public void TrailingPunctuationIsNotPartOfTheHandle() =>
-        Assert.Equal(["a.bsky.social"], MentionScanPolicy.Handles("thanks @a.bsky.social."));
+        CollectionAssert.AreEqual(new[] { "a.bsky.social" }, MentionScanPolicy.Handles("thanks @a.bsky.social.").ToList());
 }

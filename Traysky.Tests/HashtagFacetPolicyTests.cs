@@ -1,66 +1,69 @@
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Linq;
 using Traysky.Services;
 
 namespace Traysky.Tests;
 
+[TestClass]
 public class HashtagFacetPolicyTests
 {
-    [Fact]
+    [TestMethod]
     public void HyphenatedTagIsOneTag()
     {
         var spans = HashtagFacetPolicy.Find("Happy #tray-tober all");
 
-        HashtagSpan span = Assert.Single(spans);
-        Assert.Equal("tray-tober", span.Tag);
-        Assert.Equal(6, span.ByteStart);
-        Assert.Equal(17, span.ByteEnd);
+        HashtagSpan span = Assert.ContainsSingle(spans);
+        Assert.AreEqual("tray-tober", span.Tag);
+        Assert.AreEqual(6, span.ByteStart);
+        Assert.AreEqual(17, span.ByteEnd);
     }
 
-    [Fact]
+    [TestMethod]
     public void TrailingPunctuationIsNotPartOfTheTag()
     {
-        Assert.Equal("tray-tober", Assert.Single(HashtagFacetPolicy.Find("it's #tray-tober!")).Tag);
-        Assert.Equal("tray-tober", Assert.Single(HashtagFacetPolicy.Find("#tray-tober-")).Tag);
+        Assert.AreEqual("tray-tober", Assert.ContainsSingle(HashtagFacetPolicy.Find("it's #tray-tober!")).Tag);
+        Assert.AreEqual("tray-tober", Assert.ContainsSingle(HashtagFacetPolicy.Find("#tray-tober-")).Tag);
     }
 
-    [Fact]
+    [TestMethod]
     public void ByteOffsetsCountUtf8()
     {
-        HashtagSpan span = Assert.Single(HashtagFacetPolicy.Find("é #tag"));
+        HashtagSpan span = Assert.ContainsSingle(HashtagFacetPolicy.Find("é #tag"));
 
-        Assert.Equal(3, span.ByteStart);
-        Assert.Equal(7, span.ByteEnd);
+        Assert.AreEqual(3, span.ByteStart);
+        Assert.AreEqual(7, span.ByteEnd);
     }
 
-    [Theory]
-    [InlineData("#123")]
-    [InlineData("a#tag")]
-    [InlineData("# ")]
-    [InlineData("")]
-    public void NonTagsAreIgnored(string text) => Assert.Empty(HashtagFacetPolicy.Find(text));
+    [TestMethod]
+    [DataRow("#123")]
+    [DataRow("a#tag")]
+    [DataRow("# ")]
+    [DataRow("")]
+    public void NonTagsAreIgnored(string text) => Assert.IsEmpty(HashtagFacetPolicy.Find(text));
 
-    [Theory]
-    [InlineData("#", 0, "")]
-    [InlineData("hi #tray-t", 3, "tray-t")]
-    [InlineData("a\n#x-y-", 2, "x-y-")]
-    [InlineData("tok​#a-b", 4, "a-b")]
+    [TestMethod]
+    [DataRow("#", 0, "")]
+    [DataRow("hi #tray-t", 3, "tray-t")]
+    [DataRow("a\n#x-y-", 2, "x-y-")]
+    [DataRow("tok​#a-b", 4, "a-b")]
     public void OpenTagKeepsHyphens(string before, int start, string query)
     {
-        Assert.True(HashtagFacetPolicy.TryFindOpenTag(before, out int s, out string q));
-        Assert.Equal(start, s);
-        Assert.Equal(query, q);
+        Assert.IsTrue(HashtagFacetPolicy.TryFindOpenTag(before, out int s, out string q));
+        Assert.AreEqual(start, s);
+        Assert.AreEqual(query, q);
     }
 
-    [Theory]
-    [InlineData("")]
-    [InlineData("hi ")]
-    [InlineData("hi #tag ")]
-    [InlineData("a#tag")]
-    [InlineData("#a#b")]
-    public void NoOpenTag(string before) => Assert.False(HashtagFacetPolicy.TryFindOpenTag(before, out _, out _));
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("hi ")]
+    [DataRow("hi #tag ")]
+    [DataRow("a#tag")]
+    [DataRow("#a#b")]
+    public void NoOpenTag(string before) => Assert.IsFalse(HashtagFacetPolicy.TryFindOpenTag(before, out _, out _));
 
-    [Fact]
+    [TestMethod]
     public void FindsEachTag()
     {
-        Assert.Equal(["a", "b-c"], HashtagFacetPolicy.Find("#a #b-c").Select(s => s.Tag));
+        CollectionAssert.AreEqual(new[] { "a", "b-c" }, HashtagFacetPolicy.Find("#a #b-c").Select(s => s.Tag).ToList());
     }
 }
