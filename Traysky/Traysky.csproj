@@ -15,7 +15,8 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- CS0618: generated XamlTypeInfo.g.cs references the obsolete WinUIEx.Icon type via WindowEx.Icon -->
-    <NoWarn>$(NoWarn);CS0618</NoWarn>
+    <!-- BSKYUnspecced: getPostThreadV2 is marked experimental in idunno.Bluesky -->
+    <NoWarn>$(NoWarn);CS0618;BSKYUnspecced</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

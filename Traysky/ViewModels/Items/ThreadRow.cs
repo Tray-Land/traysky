@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Traysky.Services;
 
 namespace Traysky.ViewModels.Items;
 
@@ -15,6 +16,13 @@ public sealed class ThreadRow
 
     /// <summary>The post the page was opened for; drawn with a highlight and not tappable.</summary>
     public bool IsMain { get; init; }
+
+    /// <summary>Replies to this post the server left out (v2 threads); 0 when none or unknown.</summary>
+    public int MoreReplies { get; init; }
+
+    public bool HasMoreReplies => MoreReplies > 0;
+
+    public string MoreRepliesText => ThreadFlattenPolicy.MoreRepliesText(MoreReplies);
 
     public Thickness Indent => new(Depth * 16, 0, 0, 0);
 }

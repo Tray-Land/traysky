@@ -9,8 +9,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Traysky.ViewModels.Items;
+using Unspecced = idunno.Bluesky.Unspecced;
 
 namespace Traysky.Services;
+
+/// <summary>Rows for a v2 thread plus what the layout dropped.</summary>
+/// <param name="HiddenCount">Replies hidden by the author or muted by the viewer.</param>
+public sealed record ThreadMapResult(List<ThreadRow> Rows, int HiddenCount, bool AncestorsTruncated);
 
 /// <summary>
 /// Projects idunno.Bluesky's wire types onto the app's item models. The only place that
@@ -409,6 +414,7 @@ public static class FeedMapper
 
             case ViewNotFound:
             case ViewBlocked:
+            case ViewDetached:
                 return new EmbedItem { Kind = EmbedKind.Unavailable };
 
             default:
@@ -482,6 +488,88 @@ public static class FeedMapper
         rows.Add(new ThreadRow { Post = ToPostItem(main.Post, replyingTo: previousHandle), Depth = 0, IsMain = true });
 
         AddReplies(rows, main, main.Post.Author?.Handle?.ToString(), depth: 1, maxDepth);
+        return rows;
+    }
+
+    /// <summary>
+    /// Rows for a v2 thread (anchor at depth 0, flat list). Layout rules are in
+    /// <see cref="ThreadFlattenPolicy"/>; this only reads the SDK items and builds the rows.
+    /// Returns an empty list when the anchor itself is unavailable.
+    /// </summary>
+    public static ThreadMapResult FlattenThreadV2(IReadOnlyCollection<Unspecced.ThreadItem> items, bool includeHidden = false)
+    {
+        List<Unspecced.ThreadItem> list = [.. items];
+        ThreadLayout layout = ThreadFlattenPolicy.Flatten(ToNodes(list), includeHidden);
+        return new ThreadMapResult(BuildRows(list, layout.Entries, anchorKnown: true), layout.HiddenCount, layout.AncestorsTruncated);
+    }
+
+    /// <summary>Rows for the "other replies" endpoint: replies only, hidden ones included.</summary>
+    public static List<ThreadRow> FlattenOtherReplies(IReadOnlyCollection<Unspecced.ThreadItem> items, string? anchorHandle)
+    {
+        List<Unspecced.ThreadItem> list = [.. items];
+        int firstDepth = list.Count == 0 ? 1 : Math.Min(1, list.Min(i => i.Depth));
+        (List<ThreadEntry> entries, _) = ThreadFlattenPolicy.FlattenReplies(ToNodes(list), includeHidden: true, firstDepth);
+        return BuildRows(list, entries, anchorKnown: false, anchorHandle);
+    }
+
+    private static List<ThreadNode> ToNodes(List<Unspecced.ThreadItem> items)
+    {
+        List<ThreadNode> nodes = new(items.Count);
+        for (int i = 0; i < items.Count; i++)
+        {
+            nodes.Add(items[i].Value switch
+            {
+                Unspecced.ThreadItemPost p => new ThreadNode(i, items[i].Depth, ThreadNodeKind.Post,
+                    p.MoreReplies, p.MoreParents, p.HiddenByThreadGate, p.MutedByViewer),
+                Unspecced.ThreadItemBlocked => new ThreadNode(i, items[i].Depth, ThreadNodeKind.Blocked),
+                Unspecced.ThreadItemNotFound => new ThreadNode(i, items[i].Depth, ThreadNodeKind.NotFound),
+                _ => new ThreadNode(i, items[i].Depth, ThreadNodeKind.Unavailable)
+            });
+        }
+        return nodes;
+    }
+
+    private static List<ThreadRow> BuildRows(
+        List<Unspecced.ThreadItem> items, IReadOnlyList<ThreadEntry> entries, bool anchorKnown, string? anchorHandle = null)
+    {
+        List<ThreadRow> rows = new(entries.Count);
+
+        // "Replying to @x" comes from whichever post sits one level up: the previous ancestor for
+        // the chain above, and the nearest earlier row one display level shallower for replies.
+        Dictionary<int, string?> handleAtDepth = [];
+        if (!anchorKnown)
+            handleAtDepth[0] = anchorHandle;
+        string? previousAncestor = null;
+
+        foreach (ThreadEntry entry in entries)
+        {
+            if (items[entry.Index].Value is not Unspecced.ThreadItemPost item)
+                continue;
+
+            string? handle = item.Post.Author?.Handle?.ToString();
+            bool isReply = entry.Depth > 0;
+            string? replyingTo = isReply
+                ? handleAtDepth.GetValueOrDefault(entry.Depth - 1)
+                : previousAncestor;
+
+            rows.Add(new ThreadRow
+            {
+                Post = ToPostItem(item.Post, replyingTo: replyingTo),
+                Depth = entry.Depth,
+                IsMain = entry.IsMain,
+                MoreReplies = entry.MoreReplies
+            });
+
+            if (isReply || entry.IsMain)
+                handleAtDepth[entry.Depth] = handle;
+            else
+                previousAncestor = handle;
+
+            // The anchor is the parent of depth-1 replies; ancestors never are.
+            if (entry.IsMain)
+                handleAtDepth[0] = handle;
+        }
+
         return rows;
     }
 

@@ -76,6 +76,12 @@ public sealed partial class SettingsViewModel : ObservableObject
         set { SettingsService.ShowReplyContext = value; OnPropertyChanged(); }
     }
 
+    public bool UseThreadV2
+    {
+        get => SettingsService.UseThreadV2;
+        set { SettingsService.UseThreadV2 = value; OnPropertyChanged(); }
+    }
+
     // ---- Toasts --------------------------------------------------------------------------
 
     public bool ToastMentions

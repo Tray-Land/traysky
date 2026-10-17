@@ -60,6 +60,12 @@ public sealed partial class PostPage : Page
         NavigationService.Instance.Navigate(typeof(PostPage), new PostPageArgs(null, context, atUri));
     }
 
+    private void MoreReplies_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: ThreadRow row })
+            Open(row.Post);
+    }
+
     private void PostCard_ThreadRequested(object? sender, PostItem post)
     {
         // A reply inside this thread opens as its own page, so its replies can be explored;

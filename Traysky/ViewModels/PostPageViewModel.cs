@@ -1,10 +1,9 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using idunno.AtProto;
-using idunno.Bluesky.Feed;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading.Tasks;
 using Traysky.Models;
 using Traysky.Services;
@@ -19,8 +18,6 @@ namespace Traysky.ViewModels;
 /// </summary>
 public sealed partial class PostPageViewModel : ObservableObject
 {
-    private const int ReplyDepth = 3;
-
     public ObservableCollection<ThreadRow> Rows { get; } = [];
 
     [ObservableProperty]
@@ -51,6 +48,9 @@ public sealed partial class PostPageViewModel : ObservableObject
         Context = args.Context;
         Error = null;
         HasNoReplies = false;
+        HasHiddenReplies = false;
+        HiddenRepliesError = null;
+        CanSort = false;
 
         Rows.Clear();
         if (args.Post is not null)
@@ -72,17 +72,11 @@ public sealed partial class PostPageViewModel : ObservableObject
         IsLoading = true;
         try
         {
-            await LabelService.Instance.EnsureLoadedAsync();
-            AtProtoHttpResult<PostThread> result = await BlueskySessionService.Instance.Agent.GetPostThread(
-                new AtUri(atUri),
-                depth: ReplyDepth,
-                parentHeight: 10,
-                subscribedLabelers: LabelService.Instance.Subscribed);
+            ThreadLoadResult result = await ThreadService.LoadAsync(atUri, _sort);
 
-            if (!result.Succeeded || result.Result is null)
+            if (!result.Succeeded && result.Status != System.Net.HttpStatusCode.OK)
             {
-                LogService.Warn("Thread", $"GetPostThread failed: {(int)result.StatusCode} {result.AtErrorDetail?.Error}");
-                Error = result.StatusCode switch
+                Error = result.Status switch
                 {
                     System.Net.HttpStatusCode.NotFound => "This post has been deleted.",
                     0 => "Couldn't reach Bluesky. Check your connection.",
@@ -91,12 +85,17 @@ public sealed partial class PostPageViewModel : ObservableObject
                 return;
             }
 
-            List<ThreadRow> rows = FeedMapper.FlattenThread(result.Result, ReplyDepth);
+            List<ThreadRow> rows = result.Rows;
             if (rows.Count == 0)
             {
                 Error = "This post is no longer available.";
                 return;
             }
+
+            _atUri = atUri;
+            CanSort = result.UsedV2;
+            HasHiddenReplies = result.HasHiddenReplies;
+            HiddenRepliesError = null;
 
             // Carry the seed's optimistic like/repost state forward if the server view is
             // older than a click the user just made on the card that opened this page.
@@ -113,11 +112,12 @@ public sealed partial class PostPageViewModel : ObservableObject
             foreach (ThreadRow row in rows)
                 Rows.Add(row);
 
-            HasNoReplies = rows.Count == 1 || !rows.Exists(r => r.Depth > 0);
+            HasNoReplies = (rows.Count == 1 || !rows.Exists(r => r.Depth > 0)) && !result.HasHiddenReplies;
+            OnPropertyChanged(nameof(ShowSort));
         }
         catch (Exception ex)
         {
-            LogService.Error("Thread", "GetPostThread threw", ex);
+            LogService.Error("Thread", "Thread load threw", ex);
             Error = "Couldn't load the thread.";
         }
         finally
@@ -125,6 +125,85 @@ public sealed partial class PostPageViewModel : ObservableObject
             IsLoading = false;
         }
     }
+
+    /// <summary>Labels for the sort picker, in <see cref="ThreadSort"/> order.</summary>
+    public IReadOnlyList<string> SortLabels { get; } =
+        [ThreadSortOptions.Label(ThreadSort.Top), ThreadSortOptions.Label(ThreadSort.Oldest), ThreadSortOptions.Label(ThreadSort.Newest)];
+
+    public int SortIndex
+    {
+        get => (int)_sort;
+        set
+        {
+            if (value < 0 || value >= SortLabels.Count || value == (int)_sort)
+                return;
+
+            _sort = (ThreadSort)value;
+            SettingsService.ThreadSort = _sort;
+            OnPropertyChanged();
+
+            if (_lastArgs is not null)
+                _ = LoadAsync(_lastArgs);
+        }
+    }
+
+    /// <summary>The sort picker only applies to v2 threads that have replies to sort.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowSort))]
+    public partial bool CanSort { get; private set; }
+
+    public bool ShowSort => CanSort && Rows.Count > 1;
+
+    [ObservableProperty]
+    public partial bool HasHiddenReplies { get; private set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasHiddenRepliesError))]
+    public partial string? HiddenRepliesError { get; private set; }
+
+    public bool HasHiddenRepliesError => !string.IsNullOrEmpty(HiddenRepliesError);
+
+    [ObservableProperty]
+    public partial bool IsLoadingHidden { get; private set; }
+
+    /// <summary>Fetches replies the author hid or the viewer muted and appends them to the thread.</summary>
+    [RelayCommand]
+    private async Task ShowHiddenReplies()
+    {
+        if (_atUri is null || IsLoadingHidden)
+            return;
+
+        IsLoadingHidden = true;
+        HiddenRepliesError = null;
+        try
+        {
+            List<ThreadRow>? hidden = await ThreadService.LoadOtherRepliesAsync(_atUri, Post?.AuthorHandle);
+            if (hidden is null)
+            {
+                HiddenRepliesError = "Couldn't load hidden replies.";
+                return;
+            }
+
+            // Drop any the thread already shows (the two responses can overlap).
+            HashSet<string?> shown = [.. Rows.Select(r => r.Post.AtUri)];
+            foreach (ThreadRow row in hidden)
+            {
+                if (shown.Add(row.Post.AtUri))
+                    Rows.Add(row);
+            }
+
+            HasHiddenReplies = false;
+            HasNoReplies = false;
+            OnPropertyChanged(nameof(ShowSort));
+        }
+        finally
+        {
+            IsLoadingHidden = false;
+        }
+    }
+
+    private ThreadSort _sort = SettingsService.ThreadSort;
+    private string? _atUri;
 
     [RelayCommand]
     private Task Retry() => _lastArgs is null ? Task.CompletedTask : LoadAsync(_lastArgs);

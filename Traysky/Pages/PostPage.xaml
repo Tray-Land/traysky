@@ -13,6 +13,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -42,9 +43,18 @@
                 TextWrapping="Wrap" />
         </Grid>
 
+        <!--  Reply order (v2 threads with replies)  -->
+        <ComboBox
+            Grid.Row="1"
+            Margin="12,0,12,6"
+            HorizontalAlignment="Right"
+            ItemsSource="{x:Bind ViewModel.SortLabels}"
+            SelectedIndex="{x:Bind ViewModel.SortIndex, Mode=TwoWay}"
+            Visibility="{x:Bind ViewModel.ShowSort, Mode=OneWay}" />
+
         <ListView
             x:Name="ThreadList"
-            Grid.Row="1"
+            Grid.Row="2"
             IsItemClickEnabled="False"
             ItemsSource="{x:Bind ViewModel.Rows}"
             SelectionMode="None">
@@ -59,10 +69,19 @@
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="items:ThreadRow">
                     <Grid Background="{x:Bind helpers:BindHelpers.MainPostBackground(IsMain)}" Padding="{x:Bind Indent}">
-                        <controls:PostCard
-                            IsOpenable="{x:Bind helpers:BindHelpers.Not(IsMain)}"
-                            Post="{x:Bind Post}"
-                            ThreadRequested="PostCard_ThreadRequested" />
+                        <StackPanel>
+                            <controls:PostCard
+                                IsOpenable="{x:Bind helpers:BindHelpers.Not(IsMain)}"
+                                Post="{x:Bind Post}"
+                                ThreadRequested="PostCard_ThreadRequested" />
+                            <!--  Replies the server left out: open this post to see them  -->
+                            <HyperlinkButton
+                                Margin="56,0,12,6"
+                                Click="MoreReplies_Click"
+                                Content="{x:Bind MoreRepliesText}"
+                                Tag="{x:Bind}"
+                                Visibility="{x:Bind HasMoreReplies}" />
+                        </StackPanel>
                         <Rectangle
                             Height="1"
                             VerticalAlignment="Bottom"
@@ -82,6 +101,16 @@
                         Style="{StaticResource SecondaryTextStyle}"
                         Text="No replies yet"
                         Visibility="{x:Bind ViewModel.HasNoReplies, Mode=OneWay}" />
+                    <Button
+                        HorizontalAlignment="Center"
+                        Command="{x:Bind ViewModel.ShowHiddenRepliesCommand}"
+                        Content="Show hidden replies"
+                        Visibility="{x:Bind ViewModel.HasHiddenReplies, Mode=OneWay}" />
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        Style="{StaticResource SecondaryTextStyle}"
+                        Text="{x:Bind ViewModel.HiddenRepliesError, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.HasHiddenRepliesError, Mode=OneWay}" />
                     <InfoBar
                         IsClosable="False"
                         IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"

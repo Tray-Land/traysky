@@ -81,6 +81,11 @@
                         IsOn="{x:Bind ViewModel.ShowReplyContext, Mode=TwoWay}"
                         OffContent="Show replies in context"
                         OnContent="Show replies in context" />
+                    <TextBlock Style="{StaticResource SettingDescriptionStyle}" Text="Open posts with the newer thread view: sort replies by top, oldest or newest, and reach replies the author hid. Turn off if threads fail to load." />
+                    <ToggleSwitch
+                        IsOn="{x:Bind ViewModel.UseThreadV2, Mode=TwoWay}"
+                        OffContent="New thread view"
+                        OnContent="New thread view" />
                 </StackPanel>
             </Border>
 

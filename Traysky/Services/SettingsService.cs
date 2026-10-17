@@ -27,6 +27,8 @@ public static class SettingsService
     private const string ToastFollowsKey = "ToastFollows";
     private const string ToastLikesRepostsKey = "ToastLikesReposts";
     private const string ShowReplyContextKey = "ShowReplyContext";
+    private const string UseThreadV2Key = "UseThreadV2";
+    private const string ThreadSortKey = "ThreadSort";
     private const string LastFeedKeyKey = "LastFeedKey";
     private const string ComposeDraftKey = "ComposeDraft";
     private const string RecentHashtagsKey = "RecentHashtags";
@@ -145,6 +147,20 @@ public static class SettingsService
     {
         get => GetBool(ShowReplyContextKey, true);
         set => Set(ShowReplyContextKey, value);
+    }
+
+    /// <summary>Whether the post page uses the v2 thread endpoint (server-sorted, hidden replies). Off falls back to v1.</summary>
+    public static bool UseThreadV2
+    {
+        get => GetBool(UseThreadV2Key, true);
+        set => Set(UseThreadV2Key, value);
+    }
+
+    /// <summary>How replies are ordered on the post page when <see cref="UseThreadV2"/> is on.</summary>
+    public static ThreadSort ThreadSort
+    {
+        get => ThreadSortOptions.Parse(GetString(ThreadSortKey, ThreadSortOptions.ToApiValue(ThreadSortOptions.Default)));
+        set => Set(ThreadSortKey, ThreadSortOptions.ToApiValue(value));
     }
 
     /// <summary><see cref="ViewModels.Items.FeedTabItem.Key"/> of the feed tab last shown, so the flyout
