@@ -191,13 +191,15 @@
             Margin="0,8,0,0"
             x:Load="{x:Bind Post.HasEmbed, Mode=OneWay, FallbackValue=False}"
             Embed="{x:Bind Post.Embed, Mode=OneWay}"
-            FallbackUrl="{x:Bind Post.WebUrl, Mode=OneWay}" />
+            FallbackUrl="{x:Bind Post.WebUrl, Mode=OneWay}"
+            IsContained="{x:Bind IsContained, Mode=OneWay}" />
 
-        <!--  Actions  -->
+        <!--  Actions (none on a contained card)  -->
         <Grid
             Grid.Row="5"
             Grid.Column="1"
-            Margin="-6,4,0,0">
+            Margin="-6,4,0,0"
+            Visibility="{x:Bind helpers:BindHelpers.CollapsedIf(IsContained), Mode=OneWay}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
@@ -316,6 +318,14 @@
                                 Text="Reply and quote settings…">
                                 <MenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE72E;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem
+                                x:Name="DetachQuoteItem"
+                                Click="DetachQuote_Click"
+                                Text="Detach my post from this quote">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE71B;" />
                                 </MenuFlyoutItem.Icon>
                             </MenuFlyoutItem>
                             <MenuFlyoutItem

@@ -56,7 +56,9 @@ public sealed partial class PostItem : ObservableObject
     /// <summary>The card's bottom divider is left out where a connector line runs into the next row.</summary>
     public bool ShowDivider => !ThreadLineBelow;
 
-    public EmbedItem? Embed { get; init; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasEmbed))]
+    public partial EmbedItem? Embed { get; set; }
 
     public string? WebUrl { get; init; }
 

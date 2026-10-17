@@ -9,6 +9,20 @@ namespace Traysky.Helpers;
 /// <summary>The confirmation / reason / failure dialogs that go with mute, block and report.</summary>
 public static class ModerationDialogs
 {
+    public static async Task<bool> ConfirmDetachQuoteAsync(XamlRoot root, string handle)
+    {
+        ContentDialog dialog = new()
+        {
+            XamlRoot = root,
+            Title = "Detach your post from this quote?",
+            Content = $"@{handle}'s post will no longer show your post. This can't be undone from Traysky.",
+            PrimaryButtonText = "Detach",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
     public static async Task<bool> ConfirmBlockAsync(XamlRoot root, string handle)
     {
         ContentDialog dialog = new()

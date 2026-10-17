@@ -129,6 +129,57 @@ public static class GatesService
         }
     }
 
+    /// <summary>
+    /// Detaches <paramref name="quotingPostUri"/> from the viewer's <paramref name="quotedPostUri"/> by listing it in the
+    /// quoted post's post gate, leaving that gate's rules alone. One-way here: the quote stays detached.
+    /// True when it is detached afterwards (including when it already was).
+    /// </summary>
+    public static async Task<bool> DetachQuoteAsync(string quotedPostUri, string quotingPostUri)
+    {
+        if (!BlueskySessionService.Instance.IsSignedIn)
+            return false;
+
+        try
+        {
+            var agent = BlueskySessionService.Instance.Agent;
+            AtUri post = new(quotedPostUri);
+
+            var current = await agent.GetPostGate(post, CancellationToken.None);
+            PostGate? existing = current.Succeeded ? current.Result : null;
+            if (existing is null && !IsMissing(current.StatusCode))
+            {
+                LogService.Warn("Gates", $"GetPostGate failed: {(int)current.StatusCode} {current.AtErrorDetail?.Error}");
+                return false;
+            }
+
+            var (merge, detached) = DetachQuotePolicy.Merge(
+                existing?.DetachedEmbeddingUris?.Select(u => u.ToString()),
+                quotingPostUri,
+                idunno.Bluesky.Maximum.PostGateDetachedEmbeddingPosts);
+
+            if (merge == DetachQuotePolicy.MergeResult.AlreadyDetached)
+                return true;
+            if (merge == DetachQuotePolicy.MergeResult.LimitReached)
+            {
+                LogService.Warn("Gates", "Detach refused: the post gate already lists the maximum number of detached quotes");
+                return false;
+            }
+
+            List<AtUri> uris = detached.Select(u => new AtUri(u)).ToList();
+            ICollection<PostGateRule> rules = existing?.Rules is { } r ? [.. r] : [];
+            PostGate gate = new(post, rules, uris);
+
+            return existing is null
+                ? Check(await agent.AddPostGate(gate, CancellationToken.None), "AddPostGate")
+                : Check(await agent.UpdatePostGate(gate, CancellationToken.None), "UpdatePostGate");
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("Gates", $"Detaching a quote threw: {ex.Message}");
+            return false;
+        }
+    }
+
     private static async Task<bool> WriteThreadGateAsync(AtUri post, ReplyChoice choice, ThreadGate? existing)
     {
         var agent = BlueskySessionService.Instance.Agent;

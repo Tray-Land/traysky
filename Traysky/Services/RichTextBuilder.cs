@@ -25,8 +25,13 @@ public static class RichTextBuilder
     /// <paramref name="linkForeground"/> overrides the accent-coloured links, for text drawn on
     /// an accent background (your own chat messages); such links are underlined instead.
     /// </summary>
-    public static void Populate(RichTextBlock target, IReadOnlyList<TextSegment> segments, Brush? linkForeground = null)
+    /// <param name="onProfile">
+    /// Set for a post shown outside the tray popup (the contained profile window): a mention goes
+    /// here, and a hashtag or starter pack goes to bsky.app, instead of navigating the popup.
+    /// </param>
+    public static void Populate(RichTextBlock target, IReadOnlyList<TextSegment> segments, Brush? linkForeground = null, Action<string>? onProfile = null)
     {
+        bool contained = onProfile is not null;
         target.Blocks.Clear();
 
         Paragraph paragraph = new();
@@ -54,7 +59,10 @@ public static class RichTextBuilder
                 link.Click += (_, _) =>
                 {
                     System.Threading.Volatile.Write(ref _lastLinkClickTicks, Environment.TickCount64);
-                    Pages.ProfilePage.Open(did);
+                    if (onProfile is not null)
+                        onProfile(did);
+                    else
+                        Pages.ProfilePage.Open(did);
                 };
                 ToolTipService.SetToolTip(link, "View profile");
             }
@@ -65,7 +73,10 @@ public static class RichTextBuilder
                 link.Click += (_, _) =>
                 {
                     System.Threading.Volatile.Write(ref _lastLinkClickTicks, Environment.TickCount64);
-                    Pages.HashtagPage.Open(tag);
+                    if (contained)
+                        _ = OpenAsync("https://bsky.app/hashtag/" + Uri.EscapeDataString(tag.TrimStart('#')));
+                    else
+                        Pages.HashtagPage.Open(tag);
                 };
                 ToolTipService.SetToolTip(link, "View #" + tag.TrimStart('#'));
             }
@@ -75,7 +86,9 @@ public static class RichTextBuilder
                 link.Click += (_, _) =>
                 {
                     System.Threading.Volatile.Write(ref _lastLinkClickTicks, Environment.TickCount64);
-                    _ = OpenAsync(url);
+                    // A starter-pack link opens inside the flyout; anything else goes to the browser.
+                    if (contained || !Pages.StarterPackPage.TryOpenLink(url))
+                        _ = OpenAsync(url);
                 };
                 ToolTipService.SetToolTip(link, url);
             }

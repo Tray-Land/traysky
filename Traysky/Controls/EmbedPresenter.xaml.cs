@@ -22,6 +22,20 @@ public sealed partial class EmbedPresenter : UserControl
     public static readonly DependencyProperty FallbackUrlProperty = DependencyProperty.Register(
         nameof(FallbackUrl), typeof(string), typeof(EmbedPresenter), new PropertyMetadata(null));
 
+    /// <summary>
+    /// Set for a card in the contained profile window: the popup's image and video overlays
+    /// belong to the tray popup, so an image opens in the browser and a video in its own
+    /// pop-out window instead.
+    /// </summary>
+    public static readonly DependencyProperty IsContainedProperty = DependencyProperty.Register(
+        nameof(IsContained), typeof(bool), typeof(EmbedPresenter), new PropertyMetadata(false));
+
+    public bool IsContained
+    {
+        get => (bool)GetValue(IsContainedProperty);
+        set => SetValue(IsContainedProperty, value);
+    }
+
     public EmbedPresenter()
     {
         InitializeComponent();
@@ -52,15 +66,22 @@ public sealed partial class EmbedPresenter : UserControl
         // view somehow has no playlist (older cached data, unexpected embed shape).
         if (Embed?.IsVideo == true)
         {
-            if (Embed.VideoPlaylistUri is not null)
-                VideoViewerService.Show(Embed.VideoPlaylistUri, Embed.VideoThumbnail, Embed.VideoAspectRatio);
-            else
+            if (Embed.VideoPlaylistUri is null)
                 _ = RichTextBuilder.OpenAsync(FallbackUrl);
+            else if (IsContained)
+                VideoViewerService.PopOut(new VideoViewerRequest(Embed.VideoPlaylistUri, Embed.VideoThumbnail, Embed.VideoAspectRatio));
+            else
+                VideoViewerService.Show(Embed.VideoPlaylistUri, Embed.VideoThumbnail, Embed.VideoAspectRatio);
             return;
         }
 
         if (sender is EmbedImageView { Item: { } image })
-            ImageViewerService.Show(image.FullSize);
+        {
+            if (IsContained)
+                _ = RichTextBuilder.OpenAsync(image.FullSize?.ToString());
+            else
+                ImageViewerService.Show(image.FullSize);
+        }
         else
             _ = RichTextBuilder.OpenAsync(FallbackUrl);
     }

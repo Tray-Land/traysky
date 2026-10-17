@@ -62,6 +62,7 @@
     <Compile Include="..\Traysky\Services\GroupChatPolicy.cs" Link="Services\GroupChatPolicy.cs" />
     <Compile Include="..\Traysky\Services\MuteTargetPolicy.cs" Link="Services\MuteTargetPolicy.cs" />
     <Compile Include="..\Traysky\Services\ProfileHydrationPolicy.cs" Link="Services\ProfileHydrationPolicy.cs" />
+    <Compile Include="..\Traysky\Services\DetachQuotePolicy.cs" Link="Services\DetachQuotePolicy.cs" />
     <Compile Include="..\Traysky\Services\ChatReadPolicy.cs" Link="Services\ChatReadPolicy.cs" />
     <Compile Include="..\Traysky\Services\StarterPackPolicy.cs" Link="Services\StarterPackPolicy.cs" />
     <Compile Include="..\Traysky\Services\ChatNotificationPreferencePolicy.cs" Link="Services\ChatNotificationPreferencePolicy.cs" />

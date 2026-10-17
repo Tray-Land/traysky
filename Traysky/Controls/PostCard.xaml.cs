@@ -28,6 +28,18 @@ public sealed partial class PostCard : UserControl
         nameof(IsOpenable), typeof(bool), typeof(PostCard), new PropertyMetadata(true));
 
     /// <summary>
+    /// True for a card in the contained profile window (see <see cref="Pages.ProfilePage"/>):
+    /// the whole card, embeds included, is read-only and never navigates the tray popup, touches
+    /// the shared compose draft or opens the popup's media overlays. The actions row is hidden,
+    /// and an avatar or mention click is raised as <see cref="ProfileRequested"/> for the host.
+    /// </summary>
+    public static readonly DependencyProperty IsContainedProperty = DependencyProperty.Register(
+        nameof(IsContained), typeof(bool), typeof(PostCard), new PropertyMetadata(false, OnIsContainedChanged));
+
+    /// <summary>Contained mode only: the author's avatar or a mention was clicked; the argument is the account's DID or handle.</summary>
+    public event EventHandler<string>? ProfileRequested;
+
+    /// <summary>
     /// A tap that was not on a button, link, avatar or embed. Anything wanting to fall back to
     /// the browser, or ignore it, is expected to not subscribe.
     /// </summary>
@@ -78,7 +90,8 @@ public sealed partial class PostCard : UserControl
 
     private void UpdateInlineReplyVisibility()
     {
-        bool isReplyingHere = Post is not null && ReferenceEquals(ComposeViewModel.Instance.ReplyTo, Post);
+        // A contained card has no reply action, and must never realize the editor over the shared draft.
+        bool isReplyingHere = !IsContained && Post is not null && ReferenceEquals(ComposeViewModel.Instance.ReplyTo, Post);
 
         // The box is x:Load="False" and stays unrealized until this card is first replied to.
         // Realized here - before BeginReply raises FocusRequested - so the new box subscribes
@@ -101,6 +114,24 @@ public sealed partial class PostCard : UserControl
         get => (PostItem?)GetValue(PostProperty);
         set => SetValue(PostProperty, value);
     }
+
+    public bool IsContained
+    {
+        get => (bool)GetValue(IsContainedProperty);
+        set => SetValue(IsContainedProperty, value);
+    }
+
+    private static void OnIsContainedChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        // Mentions in the text are wired when the text is built, so a late change rebuilds it.
+        PostCard card = (PostCard)d;
+        if (card.Post is { } post)
+            card.PopulateText(post);
+    }
+
+    private void PopulateText(PostItem post) =>
+        RichTextBuilder.Populate(PostText, post.Segments,
+            onProfile: IsContained ? key => ProfileRequested?.Invoke(this, key) : null);
 
     public bool IsOpenable
     {
@@ -196,7 +227,7 @@ public sealed partial class PostCard : UserControl
         card._textHasSelection = card._textHadSelection = false;
         card.Visibility = Visibility.Visible; // undo a delete-collapse on a recycled container
         if (e.NewValue is PostItem post)
-            RichTextBuilder.Populate(card.PostText, post.Segments);
+            card.PopulateText(post);
         else
             card.PostText.Blocks.Clear();
 
@@ -278,7 +309,8 @@ public sealed partial class PostCard : UserControl
             return;
 
         PostMenuState menu = PostMenuPolicy.For(
-            Post.AuthorDid, BlueskySessionService.Instance.Did, BlueskySessionService.Instance.IsSignedIn, Post.IsThreadMuted);
+            Post.AuthorDid, BlueskySessionService.Instance.Did, BlueskySessionService.Instance.IsSignedIn, Post.IsThreadMuted,
+            Post.Embed is { Kind: EmbedKind.Quote } ? Post.Embed.QuoteAtUri : null);
 
         Visibility moderation = Show(menu.ShowAccountModeration);
         ModerationSeparator.Visibility = moderation;
@@ -288,8 +320,9 @@ public sealed partial class PostCard : UserControl
 
         DeleteItem.Visibility = Show(menu.ShowDelete);
         InteractionItem.Visibility = Show(menu.ShowInteractionSettings);
+        DetachQuoteItem.Visibility = Show(menu.ShowDetachQuote);
         MuteThreadItem.Visibility = Show(menu.ShowMuteThread);
-        DeleteSeparator.Visibility = Show(menu.ShowDelete || menu.ShowMuteThread);
+        DeleteSeparator.Visibility = Show(menu.ShowDelete || menu.ShowMuteThread || menu.ShowDetachQuote);
 
         MuteThreadItem.Text = menu.MuteThreadLabel;
         MuteItem.Text = $"Mute @{Post.AuthorHandle}";
@@ -316,6 +349,23 @@ public sealed partial class PostCard : UserControl
         XamlRoot root = XamlRoot;
         if (!await Helpers.GateDialogs.EditPostAsync(root, post))
             await Helpers.ModerationDialogs.ShowMessageAsync(root, "Couldn't save", "The reply and quote settings didn't change. Try again in a moment.");
+    }
+
+    private async void DetachQuote_Click(object sender, RoutedEventArgs e)
+    {
+        if (Post is not { Embed: { Kind: EmbedKind.Quote, QuoteAtUri: { } quotedUri } } post || XamlRoot is null)
+            return;
+        if (!DetachQuotePolicy.CanDetach(quotedUri, BlueskySessionService.Instance.Did, BlueskySessionService.Instance.IsSignedIn))
+            return;
+
+        XamlRoot root = XamlRoot;
+        if (!await Helpers.ModerationDialogs.ConfirmDetachQuoteAsync(root, post.AuthorHandle))
+            return;
+
+        if (await GatesService.DetachQuoteAsync(quotedUri, post.AtUri))
+            post.Embed = new EmbedItem { Kind = EmbedKind.Unavailable };
+        else
+            await Helpers.ModerationDialogs.ShowMessageAsync(root, "Couldn't detach", "Your post wasn't detached from the quote. Try again in a moment.");
     }
 
     private async void DeletePost_Click(object sender, RoutedEventArgs e)
@@ -411,8 +461,14 @@ public sealed partial class PostCard : UserControl
 
     private void OpenProfile()
     {
-        if (Post is not null)
-            Pages.ProfilePage.Open(Post.AuthorDid.Length > 0 ? Post.AuthorDid : Post.AuthorHandle);
+        if (Post is null)
+            return;
+
+        string key = Post.AuthorDid.Length > 0 ? Post.AuthorDid : Post.AuthorHandle;
+        if (IsContained)
+            ProfileRequested?.Invoke(this, key);
+        else
+            Pages.ProfilePage.Open(key);
     }
 
     private static void CopyToClipboard(string? text)

@@ -50,6 +50,22 @@ public class PostMenuPolicyTests
     }
 
     [TestMethod]
+    public void QuoteOfMyPost_ByAnother_OffersDetach()
+    {
+        const string mine = "at://did:me/app.bsky.feed.post/1";
+        Assert.IsTrue(PostMenuPolicy.For("did:them", "did:me", true, false, mine).ShowDetachQuote);
+        Assert.IsFalse(PostMenuPolicy.For("did:them", "did:me", true, false, "at://did:x/app.bsky.feed.post/1").ShowDetachQuote);
+        Assert.IsFalse(PostMenuPolicy.For("did:them", "did:me", true, false).ShowDetachQuote);
+        Assert.IsFalse(PostMenuPolicy.For("did:them", "did:me", false, false, mine).ShowDetachQuote);
+    }
+
+    [TestMethod]
+    public void QuoteOfMyPost_ByMe_DoesNotOfferDetach()
+    {
+        Assert.IsFalse(PostMenuPolicy.For("did:me", "did:me", true, false, "at://did:me/app.bsky.feed.post/1").ShowDetachQuote);
+    }
+
+    [TestMethod]
     public void ThreadRootUri_FallsBackToThePost()
     {
         Assert.AreEqual("at://post", PostMenuPolicy.ThreadRootUri("at://post", null));
