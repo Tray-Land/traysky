@@ -8,12 +8,166 @@
     xmlns:helpers="using:Traysky.Helpers"
     xmlns:items="using:Traysky.ViewModels.Items"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:services="using:Traysky.Services"
     mc:Ignorable="d">
+
+    <Page.Resources>
+        <DataTemplate x:Key="PostRowTemplate" x:DataType="items:PostItem">
+            <Grid>
+                <controls:PostCard Post="{x:Bind}" ThreadRequested="PostCard_ThreadRequested" />
+                <Rectangle
+                    Height="1"
+                    VerticalAlignment="Bottom"
+                    Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+            </Grid>
+        </DataTemplate>
+
+        <!--  Feeds open on bsky.app, like the Explore suggestions.  -->
+        <DataTemplate x:Key="FeedRowTemplate" x:DataType="items:FeedSuggestionItem">
+            <Grid
+                Padding="12,8"
+                Background="Transparent"
+                ColumnSpacing="10"
+                Tapped="FeedRow_Tapped">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <PersonPicture
+                    Width="{StaticResource AvatarSize}"
+                    Height="{StaticResource AvatarSize}"
+                    VerticalAlignment="Top"
+                    DisplayName="{x:Bind DisplayName}"
+                    ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(AvatarUri)}" />
+                <StackPanel Grid.Column="1" Spacing="1">
+                    <TextBlock
+                        FontWeight="SemiBold"
+                        Text="{x:Bind DisplayName}"
+                        TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                        Style="{StaticResource SecondaryTextStyle}"
+                        Text="{x:Bind ByLine}"
+                        TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                        MaxLines="3"
+                        Text="{x:Bind Description}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind HasDescription}" />
+                </StackPanel>
+                <Button
+                    Grid.Column="2"
+                    VerticalAlignment="Top"
+                    Click="PinFeed_Click"
+                    Content="{x:Bind PinLabel, Mode=OneWay}"
+                    Tapped="PinFeed_Tapped"
+                    ToolTipService.ToolTip="Add to or remove from your feed tabs"
+                    Visibility="{x:Bind CanPin}" />
+                <Rectangle
+                    Grid.ColumnSpan="3"
+                    Height="1"
+                    Margin="-12,0"
+                    VerticalAlignment="Bottom"
+                    Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="StarterPackRowTemplate" x:DataType="items:StarterPackItem">
+            <Grid
+                Padding="12,8"
+                Background="Transparent"
+                ColumnSpacing="10"
+                Tapped="PackRow_Tapped">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <PersonPicture
+                    Width="{StaticResource AvatarSize}"
+                    Height="{StaticResource AvatarSize}"
+                    VerticalAlignment="Top"
+                    DisplayName="{x:Bind Name}"
+                    ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(CreatorAvatarUri)}" />
+                <StackPanel Grid.Column="1" Spacing="1">
+                    <TextBlock
+                        FontWeight="SemiBold"
+                        Text="{x:Bind Name}"
+                        TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                        Style="{StaticResource SecondaryTextStyle}"
+                        Text="{x:Bind ByLine}"
+                        TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                        MaxLines="3"
+                        Text="{x:Bind Description}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind HasDescription}" />
+                </StackPanel>
+                <Rectangle
+                    Grid.ColumnSpan="2"
+                    Height="1"
+                    Margin="-12,0"
+                    VerticalAlignment="Bottom"
+                    Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ListRowTemplate" x:DataType="items:ListItem">
+            <Grid
+                Padding="12,8"
+                Background="Transparent"
+                ColumnSpacing="10"
+                Tapped="ListRow_Tapped">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <PersonPicture
+                    Width="{StaticResource AvatarSize}"
+                    Height="{StaticResource AvatarSize}"
+                    VerticalAlignment="Top"
+                    DisplayName="{x:Bind Name}"
+                    ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(AvatarUri)}" />
+                <StackPanel Grid.Column="1" Spacing="1">
+                    <TextBlock
+                        FontWeight="SemiBold"
+                        Text="{x:Bind Name}"
+                        TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                        Style="{StaticResource SecondaryTextStyle}"
+                        Text="{x:Bind ByLine}"
+                        TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                        MaxLines="3"
+                        Text="{x:Bind Description}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind HasDescription}" />
+                </StackPanel>
+                <Rectangle
+                    Grid.ColumnSpan="2"
+                    Height="1"
+                    Margin="-12,0"
+                    VerticalAlignment="Bottom"
+                    Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+            </Grid>
+        </DataTemplate>
+
+        <helpers:ProfileRowTemplateSelector
+            x:Key="RowSelector"
+            FeedTemplate="{StaticResource FeedRowTemplate}"
+            ListTemplate="{StaticResource ListRowTemplate}"
+            PostTemplate="{StaticResource PostRowTemplate}"
+            StarterPackTemplate="{StaticResource StarterPackRowTemplate}" />
+    </Page.Resources>
 
     <Grid>
         <ListView
             x:Name="PostList"
             IsItemClickEnabled="False"
+            ItemTemplateSelector="{StaticResource RowSelector}"
             ItemsSource="{x:Bind ViewModel.Posts}"
             SelectionMode="None">
             <ListView.ItemContainerStyle>
@@ -73,19 +227,96 @@
                                 Content="{x:Bind ViewModel.FollowLabel, Mode=OneWay}"
                                 IsEnabled="{x:Bind ViewModel.CanFollow, Mode=OneWay}"
                                 Style="{x:Bind FollowButtonStyle(ViewModel.IsFollowing), Mode=OneWay}" />
+                            <Button ToolTipService.ToolTip="{x:Bind ViewModel.BellTooltip, Mode=OneWay}" Visibility="{x:Bind ViewModel.ShowBell, Mode=OneWay}">
+                                <Grid>
+                                    <FontIcon
+                                        FontSize="14"
+                                        Glyph="&#xE7ED;"
+                                        Visibility="{x:Bind helpers:BindHelpers.CollapsedIf(ViewModel.IsBellOn), Mode=OneWay}" />
+                                    <FontIcon
+                                        FontSize="14"
+                                        Glyph="&#xEA8F;"
+                                        Visibility="{x:Bind ViewModel.IsBellOn, Mode=OneWay}" />
+                                </Grid>
+                                <Button.Flyout>
+                                    <MenuFlyout Opening="Bell_Opening" Placement="BottomEdgeAlignedRight">
+                                        <RadioMenuFlyoutItem
+                                            x:Name="BellOffItem"
+                                            Click="Bell_Click"
+                                            GroupName="BellLevel"
+                                            Tag="Off"
+                                            Text="Off" />
+                                        <RadioMenuFlyoutItem
+                                            x:Name="BellPostsItem"
+                                            Click="Bell_Click"
+                                            GroupName="BellLevel"
+                                            Tag="Posts"
+                                            Text="Posts" />
+                                        <RadioMenuFlyoutItem
+                                            x:Name="BellRepliesItem"
+                                            Click="Bell_Click"
+                                            GroupName="BellLevel"
+                                            Tag="PostsAndReplies"
+                                            Text="Posts and replies" />
+                                    </MenuFlyout>
+                                </Button.Flyout>
+                            </Button>
+                            <Button ToolTipService.ToolTip="More">
+                                <FontIcon FontSize="14" Glyph="&#xE712;" />
+                                <Button.Flyout>
+                                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                        <MenuFlyoutItem Click="Mute_Click" Text="{x:Bind ViewModel.MuteLabel, Mode=OneWay}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE74F;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutItem Click="Block_Click" Text="{x:Bind ViewModel.BlockLabel, Mode=OneWay}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE733;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutItem Click="AddToList_Click" Text="Add to list...">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE71D;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutItem Click="Report_Click" Text="Report account">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE7C1;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                    </MenuFlyout>
+                                </Button.Flyout>
+                            </Button>
                         </StackPanel>
                         <!--  Your own profile is where Settings lives (the title bar's account button lands here).  -->
-                        <Button
+                        <StackPanel
                             Grid.Column="2"
                             Margin="0,40,0,0"
                             VerticalAlignment="Bottom"
-                            Click="SettingsButton_Click"
+                            Orientation="Horizontal"
+                            Spacing="6"
                             Visibility="{x:Bind ViewModel.IsSelf, Mode=OneWay}">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon FontSize="14" Glyph="&#xE713;" />
-                                <TextBlock Text="Settings" />
-                            </StackPanel>
-                        </Button>
+                            <Button Click="NewList_Click" ToolTipService.ToolTip="New list">
+                                <FontIcon FontSize="14" Glyph="&#xE8FD;" />
+                            </Button>
+                            <Button Click="BookmarksButton_Click" ToolTipService.ToolTip="Bookmarks">
+                                <Path
+                                    Width="10"
+                                    Height="14"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Data="F1 M3.116,15.862 C2.901,16.023 2.679,16.043 2.450,15.922 C2.222,15.801 2.107,15.619 2.107,15.377 L2.107,2.745 C2.107,1.991 2.376,1.345 2.915,0.807 C3.453,0.269 4.098,0.000 4.852,0.000 L11.148,0.000 C11.902,0.000 12.547,0.269 13.085,0.807 C13.624,1.345 13.893,1.991 13.893,2.745 L13.893,15.377 C13.893,15.619 13.778,15.801 13.550,15.922 C13.321,16.043 13.099,16.023 12.884,15.862 L8.000,12.350 Z M12.641,2.745 C12.641,2.341 12.493,1.998 12.197,1.715 C11.902,1.433 11.552,1.292 11.148,1.292 L4.852,1.292 C4.448,1.292 4.098,1.433 3.803,1.715 C3.507,1.998 3.359,2.341 3.359,2.745 L3.359,14.126 L7.637,11.059 C7.744,10.978 7.865,10.938 8.000,10.938 C8.135,10.938 8.256,10.978 8.363,11.059 L12.641,14.126 Z"
+                                    Fill="{ThemeResource TextFillColorPrimaryBrush}"
+                                    Stretch="Uniform" />
+                            </Button>
+                            <Button Click="SettingsButton_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon FontSize="14" Glyph="&#xE713;" />
+                                    <TextBlock Text="Settings" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
                     </Grid>
 
                     <StackPanel Margin="12,6,12,8" Spacing="4">
@@ -104,6 +335,47 @@
                                 <TextBlock FontSize="11" Text="Follows you" />
                             </Border>
                         </StackPanel>
+
+                        <!--  Community labels (from the labelers this account subscribes to) and any
+                              the account put on itself.  -->
+                        <ItemsControl
+                            Margin="0,4,0,0"
+                            ItemsSource="{x:Bind ViewModel.Labels, Mode=OneWay}"
+                            Visibility="{x:Bind ViewModel.HasLabels, Mode=OneWay}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="services:LabelDisplay">
+                                    <Border
+                                        Margin="0,0,0,4"
+                                        Padding="8,6"
+                                        HorizontalAlignment="Left"
+                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                        CornerRadius="4">
+                                        <StackPanel Spacing="1">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <FontIcon FontSize="12" Glyph="&#xE8EC;" />
+                                                <TextBlock
+                                                    FontSize="13"
+                                                    FontWeight="SemiBold"
+                                                    Text="{x:Bind Name}"
+                                                    TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <TextBlock
+                                                Style="{StaticResource SecondaryTextStyle}"
+                                                Text="{x:Bind Description}"
+                                                TextWrapping="Wrap"
+                                                Visibility="{x:Bind HasDescription}" />
+                                            <TextBlock
+                                                FontSize="11"
+                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                Text="{x:Bind SourceLine}"
+                                                TextWrapping="Wrap"
+                                                Visibility="{x:Bind HasSourceLine}" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
                         <TextBlock
                             Margin="0,4,0,0"
                             FontSize="13"
@@ -114,19 +386,113 @@
                             Margin="0,4,0,0"
                             Orientation="Horizontal"
                             Spacing="14">
-                            <TextBlock FontSize="13">
-                                <Run FontWeight="SemiBold" Text="{x:Bind ViewModel.FollowersCount, Mode=OneWay}" />
-                                <Run Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="followers" />
-                            </TextBlock>
-                            <TextBlock FontSize="13">
-                                <Run FontWeight="SemiBold" Text="{x:Bind ViewModel.FollowsCount, Mode=OneWay}" />
-                                <Run Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="following" />
-                            </TextBlock>
+                            <HyperlinkButton
+                                Padding="0"
+                                Click="FollowersButton_Click"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                                <TextBlock FontSize="13">
+                                    <Run FontWeight="SemiBold" Text="{x:Bind ViewModel.FollowersCount, Mode=OneWay}" />
+                                    <Run Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="followers" />
+                                </TextBlock>
+                            </HyperlinkButton>
+                            <HyperlinkButton
+                                Padding="0"
+                                Click="FollowingButton_Click"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                                <TextBlock FontSize="13">
+                                    <Run FontWeight="SemiBold" Text="{x:Bind ViewModel.FollowsCount, Mode=OneWay}" />
+                                    <Run Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="following" />
+                                </TextBlock>
+                            </HyperlinkButton>
                             <TextBlock FontSize="13">
                                 <Run FontWeight="SemiBold" Text="{x:Bind ViewModel.PostsCount, Mode=OneWay}" />
                                 <Run Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="posts" />
                             </TextBlock>
                         </StackPanel>
+
+                        <!--  "Followed by people you follow": avatar stack plus a summary line; opens the overlap list.  -->
+                        <HyperlinkButton
+                            Margin="0,2,0,0"
+                            Padding="0"
+                            Click="KnownFollowers_Click"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Visibility="{x:Bind ViewModel.HasKnownFollowers, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <ItemsControl ItemsSource="{x:Bind ViewModel.KnownFollowers}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="items:ActorItem">
+                                            <PersonPicture
+                                                Width="22"
+                                                Height="22"
+                                                Margin="0,0,-6,0"
+                                                DisplayName="{x:Bind NameOrHandle}"
+                                                ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(AvatarUri)}" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Text="{x:Bind ViewModel.KnownFollowersText, Mode=OneWay}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                        </HyperlinkButton>
+
+                        <Expander
+                            x:Name="SimilarExpander"
+                            Margin="0,6,0,0"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch"
+                            Expanding="SimilarExpander_Expanding"
+                            Header="Similar accounts"
+                            Visibility="{x:Bind ViewModel.CanShowSimilar, Mode=OneWay}">
+                            <StackPanel>
+                                <ProgressRing
+                                    Width="20"
+                                    Height="20"
+                                    HorizontalAlignment="Center"
+                                    IsActive="{x:Bind ViewModel.IsLoadingSimilar, Mode=OneWay}" />
+                                <ItemsControl ItemsSource="{x:Bind ViewModel.Similar}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="items:ActorItem">
+                                            <Grid
+                                                Padding="0,6"
+                                                Background="Transparent"
+                                                ColumnSpacing="10"
+                                                Tapped="SimilarRow_Tapped">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <PersonPicture
+                                                    Width="32"
+                                                    Height="32"
+                                                    DisplayName="{x:Bind NameOrHandle}"
+                                                    ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(AvatarUri)}" />
+                                                <StackPanel
+                                                    Grid.Column="1"
+                                                    VerticalAlignment="Center"
+                                                    Spacing="1">
+                                                    <TextBlock
+                                                        FontWeight="SemiBold"
+                                                        Text="{x:Bind NameOrHandle}"
+                                                        TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock
+                                                        Style="{StaticResource SecondaryTextStyle}"
+                                                        Text="{x:Bind HandleDisplay}"
+                                                        TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Expander>
                     </StackPanel>
 
                     <InfoBar
@@ -140,21 +506,26 @@
                         </InfoBar.ActionButton>
                     </InfoBar>
 
+                    <SelectorBar
+                        x:Name="Tabs"
+                        Margin="8,0,8,0"
+                        SelectionChanged="Tabs_SelectionChanged">
+                        <SelectorBarItem
+                            x:Name="PostsTab"
+                            IsSelected="True"
+                            Text="Posts" />
+                        <SelectorBarItem
+                            x:Name="LikesTab"
+                            Text="Likes"
+                            Visibility="{x:Bind ViewModel.IsSelf, Mode=OneWay}" />
+                        <SelectorBarItem x:Name="FeedsTab" Text="Feeds" />
+                        <SelectorBarItem x:Name="PacksTab" Text="Starter packs" />
+                        <SelectorBarItem x:Name="ListsTab" Text="Lists" />
+                    </SelectorBar>
+
                     <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
                 </StackPanel>
             </ListView.Header>
-
-            <ListView.ItemTemplate>
-                <DataTemplate x:DataType="items:PostItem">
-                    <Grid>
-                        <controls:PostCard Post="{x:Bind}" ThreadRequested="PostCard_ThreadRequested" />
-                        <Rectangle
-                            Height="1"
-                            VerticalAlignment="Bottom"
-                            Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                    </Grid>
-                </DataTemplate>
-            </ListView.ItemTemplate>
 
             <ListView.Footer>
                 <StackPanel Margin="12,8" Spacing="8">
@@ -163,6 +534,11 @@
                         Height="20"
                         HorizontalAlignment="Center"
                         IsActive="{x:Bind AnyLoading(ViewModel.IsLoading, ViewModel.IsLoadingPosts), Mode=OneWay}" />
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        Style="{StaticResource SecondaryTextStyle}"
+                        Text="{x:Bind ViewModel.EmptyText, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.ShowEmpty, Mode=OneWay}" />
                     <HyperlinkButton
                         HorizontalAlignment="Center"
                         Command="{x:Bind ViewModel.OpenInBrowserCommand}"

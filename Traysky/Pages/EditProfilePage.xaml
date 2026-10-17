@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Traysky.Pages.EditProfilePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="12,4,12,16" Spacing="10">
+            <InfoBar
+                IsClosable="False"
+                IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
+                Message="{x:Bind ViewModel.Error, Mode=OneWay}"
+                Severity="Warning">
+                <InfoBar.ActionButton>
+                    <Button Command="{x:Bind ViewModel.RetryCommand}" Content="Retry" Visibility="{x:Bind RetryVisibility(ViewModel.IsReady), Mode=OneWay}" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+
+            <ProgressRing
+                Width="20"
+                Height="20"
+                HorizontalAlignment="Center"
+                IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}" />
+
+            <ContentControl HorizontalContentAlignment="Stretch" IsEnabled="{x:Bind ViewModel.IsReady, Mode=OneWay}">
+            <StackPanel Spacing="10">
+
+                <!--  Banner  -->
+                <Border Style="{StaticResource SettingCardStyle}">
+                    <StackPanel Spacing="8">
+                        <TextBlock Style="{StaticResource SettingTitleStyle}" Text="Banner" />
+                        <Border
+                            Height="90"
+                            CornerRadius="6"
+                            Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                            <Image
+                                HorizontalAlignment="Center"
+                                Source="{x:Bind ViewModel.Banner.Preview, Mode=OneWay}"
+                                Stretch="UniformToFill" />
+                        </Border>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Command="{x:Bind ViewModel.ChooseBannerCommand}" Content="Choose picture" />
+                            <Button
+                                Command="{x:Bind ViewModel.RemoveBannerCommand}"
+                                Content="Remove"
+                                IsEnabled="{x:Bind ViewModel.Banner.HasImage, Mode=OneWay}" />
+                            <Button
+                                Command="{x:Bind ViewModel.UndoBannerCommand}"
+                                Content="Undo"
+                                IsEnabled="{x:Bind ViewModel.Banner.IsChanged, Mode=OneWay}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!--  Avatar  -->
+                <Border Style="{StaticResource SettingCardStyle}">
+                    <StackPanel Spacing="8">
+                        <TextBlock Style="{StaticResource SettingTitleStyle}" Text="Avatar" />
+                        <PersonPicture
+                            Width="72"
+                            Height="72"
+                            HorizontalAlignment="Left"
+                            DisplayName="{x:Bind ViewModel.DisplayName, Mode=OneWay}"
+                            ProfilePicture="{x:Bind ViewModel.Avatar.Preview, Mode=OneWay}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Command="{x:Bind ViewModel.ChooseAvatarCommand}" Content="Choose picture" />
+                            <Button
+                                Command="{x:Bind ViewModel.RemoveAvatarCommand}"
+                                Content="Remove"
+                                IsEnabled="{x:Bind ViewModel.Avatar.HasImage, Mode=OneWay}" />
+                            <Button
+                                Command="{x:Bind ViewModel.UndoAvatarCommand}"
+                                Content="Undo"
+                                IsEnabled="{x:Bind ViewModel.Avatar.IsChanged, Mode=OneWay}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!--  Text  -->
+                <Border Style="{StaticResource SettingCardStyle}">
+                    <StackPanel Spacing="8">
+                        <TextBox Header="Display name" Text="{x:Bind ViewModel.DisplayName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.NameCounter, Mode=OneWay}" />
+                        <TextBox
+                            Height="120"
+                            AcceptsReturn="True"
+                            Header="Bio"
+                            Text="{x:Bind ViewModel.Bio, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                            TextWrapping="Wrap" />
+                        <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind ViewModel.BioCounter, Mode=OneWay}" />
+                        <TextBlock
+                            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                            Text="{x:Bind ViewModel.ValidationMessage, Mode=OneWay}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Button
+                    Command="{x:Bind ViewModel.SaveCommand}"
+                    Content="Save"
+                    IsEnabled="{x:Bind ViewModel.CanSave, Mode=OneWay}"
+                    Style="{StaticResource AccentButtonStyle}" />
+            </StackPanel>
+            </ContentControl>
+        </StackPanel>
+    </ScrollViewer>
+</Page>
