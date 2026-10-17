@@ -13,7 +13,10 @@ public enum FeedTabKind
     Feed,
 
     /// <summary>A user list shown as a feed, fetched with <c>GetListFeed</c>.</summary>
-    List
+    List,
+
+    /// <summary>A hashtag followed in this app, fetched with a post search. <see cref="FeedTabItem.Tag"/> is set.</summary>
+    Hashtag
 }
 
 /// <summary>
@@ -32,15 +35,21 @@ public sealed class FeedTabItem
 
     public Uri? AvatarUri { get; init; }
 
+    /// <summary>The hashtag, without the #. Null unless <see cref="Kind"/> is <see cref="FeedTabKind.Hashtag"/>.</summary>
+    public string? Tag { get; init; }
+
     public string IconGlyph => Kind switch
     {
+        FeedTabKind.Hashtag => "", // Tag
         FeedTabKind.Timeline => "", // Home
         FeedTabKind.List => "",     // BulletedList
         _ => ""                     // Streams (closest Fluent glyph to a feed/RSS icon)
     };
 
     /// <summary>Stable identity for comparing tabs across a preferences refresh.</summary>
-    public string Key => Uri?.ToString() ?? "timeline";
+    public string Key => Tag is not null ? KeyForTag(Tag) : Uri?.ToString() ?? "timeline";
+
+    public static string KeyForTag(string tag) => "tag:" + tag.ToLowerInvariant();
 
     public override bool Equals(object? obj) => obj is FeedTabItem other && Key == other.Key;
 

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Traysky.Pages.MyFeedsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:helpers="using:Traysky.Helpers"
+    xmlns:items="using:Traysky.ViewModels.Items"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <ListView
+        IsEnabled="{x:Bind Not(ViewModel.IsBusy), Mode=OneWay}"
+        ItemsSource="{x:Bind ViewModel.Rows}"
+        SelectionMode="None">
+        <ListView.Header>
+            <TextBlock
+                Margin="12,4,12,8"
+                Style="{StaticResource SettingDescriptionStyle}"
+                Text="Pinned feeds show as tabs across the top of Home, in this order, on bsky.app too. Unpinning keeps a feed saved." />
+        </ListView.Header>
+        <ListView.ItemContainerStyle>
+            <Style BasedOn="{StaticResource DefaultListViewItemStyle}" TargetType="ListViewItem">
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="MinHeight" Value="0" />
+            </Style>
+        </ListView.ItemContainerStyle>
+        <ListView.ItemTemplate>
+            <DataTemplate x:DataType="items:SavedFeedRow">
+                <Grid Padding="12,8" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <PersonPicture
+                        Width="{StaticResource AvatarSize}"
+                        Height="{StaticResource AvatarSize}"
+                        VerticalAlignment="Center"
+                        DisplayName="{x:Bind Name}"
+                        ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(AvatarUri)}" />
+                    <StackPanel
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Spacing="1">
+                        <TextBlock
+                            FontWeight="SemiBold"
+                            Text="{x:Bind Name}"
+                            TextTrimming="CharacterEllipsis" />
+                        <TextBlock
+                            Style="{StaticResource SecondaryTextStyle}"
+                            Text="{x:Bind KindLabel}"
+                            TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <StackPanel
+                        Grid.Column="2"
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="2">
+                        <Button
+                            Click="MoveUp_Click"
+                            IsEnabled="{x:Bind CanMoveUp}"
+                            ToolTipService.ToolTip="Move earlier">
+                            <FontIcon FontSize="12" Glyph="&#xE70E;" />
+                        </Button>
+                        <Button
+                            Click="MoveDown_Click"
+                            IsEnabled="{x:Bind CanMoveDown}"
+                            ToolTipService.ToolTip="Move later">
+                            <FontIcon FontSize="12" Glyph="&#xE70D;" />
+                        </Button>
+                        <Button Click="Pin_Click" Content="{x:Bind PinLabel}" />
+                        <Button
+                            Click="Remove_Click"
+                            ToolTipService.ToolTip="Remove from your saved feeds"
+                            Visibility="{x:Bind CanRemove}">
+                            <FontIcon FontSize="12" Glyph="&#xE74D;" />
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </DataTemplate>
+        </ListView.ItemTemplate>
+        <ListView.Footer>
+            <StackPanel Margin="12,8" Spacing="8">
+                <ProgressRing
+                    Width="20"
+                    Height="20"
+                    HorizontalAlignment="Center"
+                    IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}" />
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    Style="{StaticResource SecondaryTextStyle}"
+                    Text="No saved feeds"
+                    Visibility="{x:Bind ViewModel.ShowEmpty, Mode=OneWay}" />
+                <InfoBar
+                    IsClosable="False"
+                    IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
+                    Message="{x:Bind ViewModel.Error, Mode=OneWay}"
+                    Severity="Warning">
+                    <InfoBar.ActionButton>
+                        <Button Command="{x:Bind ViewModel.RetryCommand}" Content="Retry" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
+            </StackPanel>
+        </ListView.Footer>
+    </ListView>
+</Page>

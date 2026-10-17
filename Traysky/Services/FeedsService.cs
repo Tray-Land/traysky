@@ -153,7 +153,7 @@ public sealed class FeedsService
         return [];
     }
 
-    private static async Task<Dictionary<string, GeneratorView>> LoadGeneratorsAsync(BlueskyAgent agent, IReadOnlyCollection<AtUri> uris)
+    internal static async Task<Dictionary<string, GeneratorView>> LoadGeneratorsAsync(BlueskyAgent agent, IReadOnlyCollection<AtUri> uris)
     {
         Dictionary<string, GeneratorView> map = [];
         if (uris.Count == 0)
@@ -176,7 +176,7 @@ public sealed class FeedsService
     }
 
     /// <summary>Pinned lists are rare (usually zero or one), so these are fetched one at a time rather than batched.</summary>
-    private static async Task<Dictionary<string, ListView>> LoadListsAsync(BlueskyAgent agent, IReadOnlyCollection<AtUri> uris)
+    internal static async Task<Dictionary<string, ListView>> LoadListsAsync(BlueskyAgent agent, IReadOnlyCollection<AtUri> uris)
     {
         Dictionary<string, ListView> map = [];
         foreach (AtUri uri in uris)
@@ -217,6 +217,49 @@ public sealed class FeedsService
         Tabs.Clear();
         foreach (FeedTabItem tab in tabs)
             Tabs.Add(tab);
+        foreach (string tag in SettingsService.FollowedHashtags)
+            Tabs.Add(TabForTag(tag));
+    }
+
+    private static FeedTabItem TabForTag(string tag) => new() { Kind = FeedTabKind.Hashtag, Tag = tag, DisplayName = "#" + tag };
+
+    /// <summary>Whether the feed generator or list at <paramref name="atUri"/> is one of the pinned tabs.</summary>
+    public bool IsPinned(string atUri) =>
+        Tabs.Any(t => t.Kind is FeedTabKind.Feed or FeedTabKind.List && t.Uri?.ToString() == atUri);
+
+    public bool IsFollowingTag(string tag) =>
+        SettingsService.FollowedHashtags.Any(t => string.Equals(t, tag, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Adds a hashtag tab after the account's feeds. Stored locally, not in the Bluesky preferences.</summary>
+    public void FollowTag(string tag)
+    {
+        tag = tag.Trim().TrimStart('#');
+        if (tag.Length == 0 || IsFollowingTag(tag))
+            return;
+
+        SettingsService.FollowedHashtags = [.. SettingsService.FollowedHashtags, tag];
+        Tabs.Add(TabForTag(tag));
+    }
+
+    public void UnfollowTag(string tag)
+    {
+        tag = tag.Trim().TrimStart('#');
+        SettingsService.FollowedHashtags = [.. SettingsService.FollowedHashtags.Where(t => !string.Equals(t, tag, StringComparison.OrdinalIgnoreCase))];
+
+        string key = FeedTabItem.KeyForTag(tag);
+        FeedTabItem? tab = Tabs.FirstOrDefault(t => t.Key == key);
+        if (tab is null)
+            return;
+
+        // Removing the tab that's showing would leave the timeline on a feed with no tab;
+        // fall back to the first tab (Loaded re-selects whatever LastFeedKey names).
+        bool wasShowing = SettingsService.LastFeedKey == key;
+        Tabs.Remove(tab);
+        if (wasShowing)
+        {
+            SettingsService.LastFeedKey = "timeline";
+            Loaded?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void Reset()
