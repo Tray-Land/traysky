@@ -9,6 +9,79 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
+    <Page.Resources>
+        <DataTemplate x:Key="ActorRowTemplate" x:DataType="items:ActorItem">
+            <Grid Padding="12,8" ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <PersonPicture
+                    Width="{StaticResource AvatarSize}"
+                    Height="{StaticResource AvatarSize}"
+                    DisplayName="{x:Bind NameOrHandle}"
+                    ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(AvatarUri)}" />
+                <StackPanel
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Spacing="1">
+                    <TextBlock
+                        FontWeight="SemiBold"
+                        Text="{x:Bind NameOrHandle}"
+                        TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                        Style="{StaticResource SecondaryTextStyle}"
+                        Text="{x:Bind HandleDisplay}"
+                        TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <Button
+                    Grid.Column="2"
+                    VerticalAlignment="Center"
+                    Click="Remove_Click"
+                    Content="{x:Bind ManagedActionLabel}" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ListRowTemplate" x:DataType="items:ListItem">
+            <Grid Padding="12,8" ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <PersonPicture
+                    Width="{StaticResource AvatarSize}"
+                    Height="{StaticResource AvatarSize}"
+                    DisplayName="{x:Bind Name}"
+                    ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(AvatarUri)}" />
+                <StackPanel
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Spacing="1">
+                    <TextBlock
+                        FontWeight="SemiBold"
+                        Text="{x:Bind Name}"
+                        TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                        Style="{StaticResource SecondaryTextStyle}"
+                        Text="{x:Bind ByLine}"
+                        TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <Button
+                    Grid.Column="2"
+                    VerticalAlignment="Center"
+                    Click="Remove_Click"
+                    Content="{x:Bind ManagedActionLabel}" />
+            </Grid>
+        </DataTemplate>
+
+        <helpers:ManagedRowTemplateSelector
+            x:Key="ManagedRowTemplateSelector"
+            ActorTemplate="{StaticResource ActorRowTemplate}"
+            ListTemplate="{StaticResource ListRowTemplate}" />
+    </Page.Resources>
+
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -24,6 +97,8 @@
                 IsSelected="True"
                 Text="Blocked" />
             <SelectorBarItem x:Name="MutedTab" Text="Muted" />
+            <SelectorBarItem x:Name="BlockedListsTab" Text="Blocked lists" />
+            <SelectorBarItem x:Name="MutedListsTab" Text="Muted lists" />
         </SelectorBar>
 
         <ListView
@@ -31,6 +106,7 @@
             Grid.Row="1"
             IsItemClickEnabled="True"
             ItemClick="PeopleList_ItemClick"
+            ItemTemplateSelector="{StaticResource ManagedRowTemplateSelector}"
             SelectionMode="None">
             <ListView.ItemContainerStyle>
                 <Style BasedOn="{StaticResource DefaultListViewItemStyle}" TargetType="ListViewItem">
@@ -40,40 +116,6 @@
                     <Setter Property="MinHeight" Value="0" />
                 </Style>
             </ListView.ItemContainerStyle>
-            <ListView.ItemTemplate>
-                <DataTemplate x:DataType="items:ActorItem">
-                    <Grid Padding="12,8" ColumnSpacing="10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <PersonPicture
-                            Width="{StaticResource AvatarSize}"
-                            Height="{StaticResource AvatarSize}"
-                            DisplayName="{x:Bind NameOrHandle}"
-                            ProfilePicture="{x:Bind helpers:BindHelpers.ImageFromUri(AvatarUri)}" />
-                        <StackPanel
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            Spacing="1">
-                            <TextBlock
-                                FontWeight="SemiBold"
-                                Text="{x:Bind NameOrHandle}"
-                                TextTrimming="CharacterEllipsis" />
-                            <TextBlock
-                                Style="{StaticResource SecondaryTextStyle}"
-                                Text="{x:Bind HandleDisplay}"
-                                TextTrimming="CharacterEllipsis" />
-                        </StackPanel>
-                        <Button
-                            Grid.Column="2"
-                            VerticalAlignment="Center"
-                            Click="Remove_Click"
-                            Content="{x:Bind ManagedActionLabel}" />
-                    </Grid>
-                </DataTemplate>
-            </ListView.ItemTemplate>
             <ListView.Footer>
                 <StackPanel Margin="12,8" Spacing="8">
                     <ProgressRing

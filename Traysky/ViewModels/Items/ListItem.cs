@@ -25,6 +25,9 @@ public sealed class ListItem
     /// <summary>The signed-in account blocks everyone on this (moderation) list.</summary>
     public bool IsBlocked { get; init; }
 
+    /// <summary>The row button on the Blocked &amp; muted screen ("Unmute" / "Unblock"); empty elsewhere.</summary>
+    public string ManagedActionLabel { get; set; } = string.Empty;
+
     public bool HasDescription => Description.Length > 0;
 
     public bool IsMine => ListPolicy.CanManage(CreatorDid, PreviewMode.IsEnabled ? PreviewMode.SelfDid : BlueskySessionService.Instance.Did);

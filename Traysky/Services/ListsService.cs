@@ -8,6 +8,9 @@ using Traysky.ViewModels.Items;
 
 namespace Traysky.Services;
 
+/// <summary>A page of muted / blocked lists; see <see cref="ListsService.GetManagedListsAsync"/>.</summary>
+public sealed record ManagedListsPage(System.Net.HttpStatusCode Status, List<ListItem>? Items, string? Cursor);
+
 /// <summary>
 /// Create, edit and delete lists and manage their members. Each call returns what the server
 /// handed back (or null / false when it refused) and logs the reason, so callers only decide how
@@ -149,8 +152,11 @@ public static class ListsService
         return false;
     }
 
-    /// <summary>Mutes or unmutes everyone on a moderation list. True when the server accepted it.</summary>
-    public static async Task<bool> SetListMutedAsync(string listUri, bool muted)
+    /// <summary>
+    /// Mutes or unmutes everyone on a list: a moderation list through the mod-list calls, a curation
+    /// list through the actor-list ones (see <see cref="MuteTargetPolicy.UsesActorListCall"/>). True when the server accepted it.
+    /// </summary>
+    public static async Task<bool> SetListMutedAsync(string listUri, bool muted, ListKind kind = ListKind.Moderation)
     {
         if (!BlueskySessionService.Instance.IsSignedIn)
             return false;
@@ -158,11 +164,19 @@ public static class ListsService
         try
         {
             var agent = BlueskySessionService.Instance.Agent;
-            var result = muted ? await agent.MuteModList(new AtUri(listUri)) : await agent.UnmuteModList(new AtUri(listUri));
+            var uri = new AtUri(listUri);
+            bool actorList = MuteTargetPolicy.UsesActorListCall(kind);
+            var result = (actorList, muted) switch
+            {
+                (true, true) => await agent.MuteActorList(uri),
+                (true, false) => await agent.UnmuteActorList(uri),
+                (false, true) => await agent.MuteModList(uri),
+                (false, false) => await agent.UnmuteModList(uri)
+            };
             if (result.Succeeded)
                 return true;
 
-            LogService.Warn("Lists", $"{(muted ? "MuteModList" : "UnmuteModList")} failed: {(int)result.StatusCode} {result.AtErrorDetail?.Error}");
+            LogService.Warn("Lists", $"{(muted ? "Mute" : "Unmute")}{(actorList ? "ActorList" : "ModList")} failed: {(int)result.StatusCode} {result.AtErrorDetail?.Error}");
         }
         catch (Exception ex)
         {
@@ -202,6 +216,34 @@ public static class ListsService
             LogService.Warn("Lists", $"Block list toggle threw: {ex.Message}");
         }
         return false;
+    }
+
+    /// <summary>
+    /// One page of the moderation lists the signed-in account has muted (<paramref name="blocks"/> false)
+    /// or blocked. <c>Items</c> is null when the lookup failed; <c>Status</c> is the HTTP status (0 when
+    /// the server wasn't reached).
+    /// </summary>
+    public static async Task<ManagedListsPage> GetManagedListsAsync(bool blocks, string? cursor, int limit)
+    {
+        try
+        {
+            await LabelService.Instance.EnsureLoadedAsync();
+            var agent = BlueskySessionService.Instance.Agent;
+            var result = blocks
+                ? await agent.GetListBlocks(limit, cursor, LabelService.Instance.Subscribed)
+                : await agent.GetListMutes(limit, cursor, LabelService.Instance.Subscribed);
+
+            if (result.Succeeded && result.Result is not null)
+                return new ManagedListsPage(result.StatusCode, result.Result.Select(FeedMapper.ToListItem).ToList(), result.Result.Cursor);
+
+            LogService.Warn("Lists", $"{(blocks ? "GetListBlocks" : "GetListMutes")} failed: {(int)result.StatusCode} {result.AtErrorDetail?.Error}");
+            return new ManagedListsPage(result.StatusCode, null, null);
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("Lists", $"{(blocks ? "GetListBlocks" : "GetListMutes")} threw: {ex.Message}");
+            return new ManagedListsPage(0, null, null);
+        }
     }
 
     /// <summary>The curation lists the signed-in account owns, for picking who may reply. Null when the lookup failed.</summary>

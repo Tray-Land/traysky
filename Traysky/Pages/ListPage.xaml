@@ -74,7 +74,7 @@
                     <StackPanel
                         Margin="12,0,12,8"
                         Spacing="6"
-                        Visibility="{x:Bind ViewModel.CanSubscribe, Mode=OneWay}">
+                        Visibility="{x:Bind ViewModel.CanMute, Mode=OneWay}">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button
                                 Click="Mute_Click"
@@ -83,7 +83,8 @@
                             <Button
                                 Click="Block_Click"
                                 Content="{x:Bind ViewModel.BlockLabel, Mode=OneWay}"
-                                IsEnabled="{x:Bind ViewModel.CanToggleSubscription, Mode=OneWay}" />
+                                IsEnabled="{x:Bind ViewModel.CanToggleSubscription, Mode=OneWay}"
+                                Visibility="{x:Bind ViewModel.CanBlock, Mode=OneWay}" />
                         </StackPanel>
                         <TextBlock
                             Style="{StaticResource SecondaryTextStyle}"

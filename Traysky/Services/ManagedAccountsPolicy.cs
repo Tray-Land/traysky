@@ -18,4 +18,9 @@ public static class ManagedAccountsPolicy
 
     public static string FailureText(bool blocks, string handle) =>
         $"Couldn't {(blocks ? "unblock" : "unmute")} @{handle}. Try again.";
+
+    public static string ListEmptyText(bool blocks) => blocks ? "You haven't blocked any lists" : "You haven't muted any lists";
+
+    public static string ListFailureText(bool blocks, string listName) =>
+        $"Couldn't {(blocks ? "unblock" : "unmute")} {listName}. Try again.";
 }

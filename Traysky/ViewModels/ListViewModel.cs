@@ -60,9 +60,13 @@ public sealed partial class ListViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsDeleted { get; private set; }
 
-    /// <summary>A moderation list: the mute / block buttons are offered, whoever made it.</summary>
+    /// <summary>A curation or moderation list: the mute button is offered, whoever made it.</summary>
     [ObservableProperty]
-    public partial bool CanSubscribe { get; private set; }
+    public partial bool CanMute { get; private set; }
+
+    /// <summary>A moderation list: the block button is offered too.</summary>
+    [ObservableProperty]
+    public partial bool CanBlock { get; private set; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(MuteLabel))]
@@ -83,7 +87,7 @@ public sealed partial class ListViewModel : ObservableObject
 
     public bool CanToggleSubscription => !IsSubscriptionBusy;
 
-    public string MuteLabel => ListPolicy.MuteLabel(IsMuted);
+    public string MuteLabel => MuteTargetPolicy.MuteLabel(_list?.Kind ?? ListKind.Moderation, IsMuted);
 
     public string BlockLabel => ListPolicy.BlockLabel(IsBlocked);
 
@@ -109,9 +113,11 @@ public sealed partial class ListViewModel : ObservableObject
         _list = list;
         ShowHeader(list);
         CanManage = list.IsMine;
-        CanSubscribe = ListPolicy.CanSubscribe(list.Kind);
+        CanMute = MuteTargetPolicy.CanMute(list.Kind);
+        CanBlock = MuteTargetPolicy.CanBlock(list.Kind);
         IsMuted = list.IsMuted;
         IsBlocked = list.IsBlocked;
+        OnPropertyChanged(nameof(MuteLabel));
         OnPropertyChanged(nameof(EmptyText));
         Members.Clear();
         Suggestions.Clear();
@@ -294,7 +300,7 @@ public sealed partial class ListViewModel : ObservableObject
 
     private async Task SetSubscriptionAsync(bool block)
     {
-        if (_list is null || !CanSubscribe || IsSubscriptionBusy)
+        if (_list is null || !(block ? CanBlock : CanMute) || IsSubscriptionBusy)
             return;
 
         bool turnOn = !(block ? IsBlocked : IsMuted);
@@ -303,7 +309,7 @@ public sealed partial class ListViewModel : ObservableObject
         SetState(block, turnOn);
 
         bool ok = PreviewMode.IsEnabled
-            || await (block ? ListsService.SetListBlockedAsync(_list.Uri, turnOn) : ListsService.SetListMutedAsync(_list.Uri, turnOn));
+            || await (block ? ListsService.SetListBlockedAsync(_list.Uri, turnOn) : ListsService.SetListMutedAsync(_list.Uri, turnOn, _list.Kind));
         if (ok)
             _list = Copy(_list, _list.Name, _list.Description, _list.MemberCount);
         else

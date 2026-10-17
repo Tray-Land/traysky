@@ -2,7 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
-using System.Collections.ObjectModel;
+using System.Collections;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using Traysky.Services;
@@ -28,6 +28,8 @@ public sealed partial class BlockedMutedPage : Page
 
         ViewModel.Blocked.CollectionChanged += OnListChanged;
         ViewModel.Muted.CollectionChanged += OnListChanged;
+        ViewModel.BlockedLists.CollectionChanged += OnListChanged;
+        ViewModel.MutedLists.CollectionChanged += OnListChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
 
         ShowSelectedList();
@@ -39,9 +41,18 @@ public sealed partial class BlockedMutedPage : Page
         _ = ViewModel.LoadAsync();
     }
 
-    private bool ShowingMuted => Tabs.SelectedItem == MutedTab;
+    private bool ShowingLists => Tabs.SelectedItem == BlockedListsTab || Tabs.SelectedItem == MutedListsTab;
 
-    private ObservableCollection<ActorItem> SelectedList => ShowingMuted ? ViewModel.Muted : ViewModel.Blocked;
+    /// <summary>The Blocked / Blocked lists tabs; the others are the muted ones.</summary>
+    private bool ShowingBlocks => Tabs.SelectedItem == BlockedTab || Tabs.SelectedItem == BlockedListsTab;
+
+    private IList SelectedList => (ShowingLists, ShowingBlocks) switch
+    {
+        (true, true) => ViewModel.BlockedLists,
+        (true, false) => ViewModel.MutedLists,
+        (false, true) => ViewModel.Blocked,
+        _ => ViewModel.Muted
+    };
 
     private void Tabs_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args) => ShowSelectedList();
 
@@ -66,7 +77,9 @@ public sealed partial class BlockedMutedPage : Page
 
     private void UpdateEmptyText()
     {
-        EmptyText.Text = ManagedAccountsPolicy.EmptyText(blocks: !ShowingMuted);
+        EmptyText.Text = ShowingLists
+            ? ManagedAccountsPolicy.ListEmptyText(ShowingBlocks)
+            : ManagedAccountsPolicy.EmptyText(ShowingBlocks);
         EmptyText.Visibility = !ViewModel.IsLoading && !ViewModel.HasError && SelectedList.Count == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -76,12 +89,19 @@ public sealed partial class BlockedMutedPage : Page
     {
         if (e.ClickedItem is ActorItem actor)
             ProfilePage.Open(actor.ProfileKey);
+        else if (e.ClickedItem is ListItem list)
+            ListPage.Open(list);
     }
 
     private void Remove_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: ActorItem actor })
-            _ = ViewModel.RemoveAsync(actor, blocks: !ShowingMuted);
+        if (sender is not FrameworkElement element)
+            return;
+
+        if (element.DataContext is ActorItem actor)
+            _ = ViewModel.RemoveAsync(actor, blocks: ShowingBlocks);
+        else if (element.DataContext is ListItem list)
+            _ = ViewModel.RemoveListAsync(list, blocks: ShowingBlocks);
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -101,7 +121,13 @@ public sealed partial class BlockedMutedPage : Page
 
         double remaining = _scrollViewer.ScrollableHeight - _scrollViewer.VerticalOffset;
         if (remaining < _scrollViewer.ViewportHeight * 2)
-            _ = ShowingMuted ? ViewModel.LoadMoreMutedAsync() : ViewModel.LoadMoreBlockedAsync();
+            _ = (ShowingLists, ShowingBlocks) switch
+            {
+                (true, true) => ViewModel.LoadMoreBlockedListsAsync(),
+                (true, false) => ViewModel.LoadMoreMutedListsAsync(),
+                (false, true) => ViewModel.LoadMoreBlockedAsync(),
+                _ => ViewModel.LoadMoreMutedAsync()
+            };
     }
 
     private static ScrollViewer? FindScrollViewer(DependencyObject root)

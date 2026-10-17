@@ -42,4 +42,13 @@ public class ManagedAccountsPolicyTests
         Assert.AreEqual("Couldn't unblock @a.test. Try again.", ManagedAccountsPolicy.FailureText(true, "a.test"));
         Assert.AreEqual("Couldn't unmute @a.test. Try again.", ManagedAccountsPolicy.FailureText(false, "a.test"));
     }
+
+    [TestMethod]
+    public void ListLabels_FollowTheKind()
+    {
+        Assert.AreEqual("You haven't blocked any lists", ManagedAccountsPolicy.ListEmptyText(blocks: true));
+        Assert.AreEqual("You haven't muted any lists", ManagedAccountsPolicy.ListEmptyText(blocks: false));
+        Assert.AreEqual("Couldn't unblock Spam. Try again.", ManagedAccountsPolicy.ListFailureText(true, "Spam"));
+        Assert.AreEqual("Couldn't unmute Spam. Try again.", ManagedAccountsPolicy.ListFailureText(false, "Spam"));
+    }
 }
