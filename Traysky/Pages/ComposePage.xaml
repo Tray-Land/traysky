@@ -9,6 +9,6 @@
     mc:Ignorable="d">
 
     <Grid VerticalAlignment="Top">
-        <controls:ComposeBox x:Name="Compose" />
+        <controls:ComposeBox x:Name="Compose" IsPageMode="True" />
     </Grid>
 </Page>

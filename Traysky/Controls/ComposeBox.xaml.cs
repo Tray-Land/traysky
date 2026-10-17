@@ -40,6 +40,29 @@ public sealed partial class ComposeBox : UserControl
     /// <summary>Held while this box is on screen with a draft in it, so the popup stays up while the user gathers content from other apps.</summary>
     private IDisposable? _lightDismissSuppression;
 
+    /// <summary>
+    /// True for the box on <see cref="Pages.ComposePage"/>: the whole page is for writing, so the
+    /// editor is large and always expanded instead of collapsing when it loses focus, and a pin
+    /// button is offered to keep the popup open.
+    /// </summary>
+    public static readonly DependencyProperty IsPageModeProperty =
+        DependencyProperty.Register(nameof(IsPageMode), typeof(bool), typeof(ComposeBox), new PropertyMetadata(false, OnIsPageModeChanged));
+
+    public bool IsPageMode
+    {
+        get => (bool)GetValue(IsPageModeProperty);
+        set => SetValue(IsPageModeProperty, value);
+    }
+
+    private static void OnIsPageModeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is ComposeBox { IsPageMode: true, IsLoaded: true } box)
+            box.ViewModel.IsExpanded = true;
+    }
+
+    /// <summary>The user's own pin; the popup also stays open on its own while a draft is in the box.</summary>
+    private bool _manuallyPinned;
+
     public ComposeBox()
     {
         InitializeComponent();
@@ -52,6 +75,11 @@ public sealed partial class ComposeBox : UserControl
         ViewModel.RestoreConfirmationRequested += OnRestoreConfirmationRequested;
         ViewModel.DraftRestored += OnDraftRestored;
         Loaded += ComposeBox_Loaded;
+
+        // handledEventsToo: the editor handles drags itself (it accepts text, not files), so a plain
+        // XAML DragOver/Drop handler on the border would never hear about a file dropped on the text area.
+        DropZone.AddHandler(DragOverEvent, new DragEventHandler(DropZone_DragOver), handledEventsToo: true);
+        DropZone.AddHandler(DropEvent, new DragEventHandler(DropZone_Drop), handledEventsToo: true);
         RegisterPropertyChangedCallback(VisibilityProperty, (_, _) => UpdateLightDismissSuppression());
 
         // A PostCard's own inline box is created fresh with every thread page visit (PostPage
@@ -81,7 +109,10 @@ public sealed partial class ComposeBox : UserControl
         ViewModel.DraftRestored += OnDraftRestored;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        if (IsPageMode)
+            ViewModel.IsExpanded = true;
         UpdateLightDismissSuppression();
+        UpdateMentionsButton();
 
         // Runs every time this instance (re)enters the visual tree, not just once: a PostCard's
         // inline box can be recycled by list virtualization, and the shared singleton VM's draft
@@ -124,9 +155,19 @@ public sealed partial class ComposeBox : UserControl
     /// </summary>
     private void UpdateLightDismissSuppression()
     {
-        bool shouldSuppress = IsLoaded
-            && Visibility == Visibility.Visible
-            && PostTextPolicy.HasDraftContent(ViewModel.Text, ViewModel.Attachments.Count);
+        // The compose page's pin also holds the popup open, and its button reads as on whenever
+        // the popup will stay open anyway (a draft can't be unpinned from under itself).
+        bool hasDraft = PostTextPolicy.HasDraftContent(ViewModel.Text, ViewModel.Attachments.Count);
+        bool visible = IsLoaded && Visibility == Visibility.Visible;
+        bool shouldSuppress = visible && (hasDraft || (IsPageMode && _manuallyPinned));
+
+        if (PinButton is not null)
+        {
+            PinButton.IsChecked = IsPageMode && (hasDraft || _manuallyPinned);
+            ToolTipService.SetToolTip(PinButton, hasDraft
+                ? "Staying open while there's a draft"
+                : _manuallyPinned ? "Unpin" : "Keep this window open");
+        }
 
         if (shouldSuppress)
         {
@@ -143,6 +184,12 @@ public sealed partial class ComposeBox : UserControl
     {
         if (e.PropertyName is nameof(ComposeViewModel.Text) or nameof(ComposeViewModel.HasAttachments))
             UpdateLightDismissSuppression();
+
+        if (e.PropertyName == nameof(ComposeViewModel.Text))
+            UpdateMentionsButton();
+
+        if (IsPageMode && e.PropertyName == nameof(ComposeViewModel.IsExpanded) && !ViewModel.IsExpanded)
+            ViewModel.IsExpanded = true;
 
         if (e.PropertyName != nameof(ComposeViewModel.Text) || _syncingFromViewModel)
             return;
@@ -196,6 +243,114 @@ public sealed partial class ComposeBox : UserControl
             return;
 
         ViewModel.Text = RichSuggestTextPolicy.StripTokenMarkup(CurrentEditorText());
+        UpdateHashtagPopup();
+    }
+
+    /// <summary>Where the '#tag' being typed starts and ends in the editor's document, valid while the popup is open.</summary>
+    private int _hashtagStart;
+    private int _hashtagEnd;
+
+    private const int HashtagLookback = HashtagFacetPolicy.MaxTagLength + 2;
+
+    private void UpdateHashtagPopup()
+    {
+        if (!IsEditorReady || Editor.TextDocument.Selection.Length != 0)
+        {
+            HashtagPopup.IsOpen = false;
+            return;
+        }
+
+        int caret = Editor.TextDocument.Selection.StartPosition;
+        int from = Math.Max(0, caret - HashtagLookback);
+        Editor.TextDocument.GetRange(from, caret).GetText(TextGetOptions.None, out string before);
+
+        if (!HashtagFacetPolicy.TryFindOpenTag(before, out int offset, out string query))
+        {
+            HashtagPopup.IsOpen = false;
+            return;
+        }
+
+        IReadOnlyList<HashtagSuggestionItem> items = ViewModel.SearchHashtags(query);
+        if (items.Count == 0)
+        {
+            HashtagPopup.IsOpen = false;
+            return;
+        }
+
+        _hashtagStart = from + offset;
+        _hashtagEnd = caret;
+        HashtagList.ItemsSource = items;
+        HashtagList.SelectedIndex = 0;
+        HashtagPopupBorder.Width = Math.Clamp(Editor.ActualWidth, 160, 280);
+        HashtagPopup.IsOpen = true;
+        PlaceHashtagPopup(items.Count);
+    }
+
+    /// <summary>
+    /// Puts the popup at the caret - below it, or above when the window has no room - instead of
+    /// at the editor's bottom edge, which can be far from the text being typed (or off screen).
+    /// </summary>
+    private void PlaceHashtagPopup(int itemCount)
+    {
+        Editor.TextDocument.Selection.GetRect(PointOptions.ClientCoordinates, out Windows.Foundation.Rect caret, out _);
+        if (caret.IsEmpty || double.IsNaN(caret.X))
+            return;
+
+        double height = Math.Min(HashtagPopupBorder.MaxHeight, itemCount * 40 + 4);
+        Windows.Foundation.Point below = Editor.TransformToVisual(HashtagPopup).TransformPoint(new Windows.Foundation.Point(caret.X, caret.Bottom + 2));
+        Windows.Foundation.Point inRoot = Editor.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(caret.X, caret.Bottom + 2));
+
+        bool fitsBelow = XamlRoot is not { } root || inRoot.Y + height <= root.Size.Height;
+        double maxX = Math.Max(0, Editor.ActualWidth - HashtagPopupBorder.Width);
+        HashtagPopup.HorizontalOffset = below.X - caret.X + Math.Clamp(caret.X, 0, maxX);
+        HashtagPopup.VerticalOffset = fitsBelow ? below.Y : below.Y - caret.Height - 4 - height;
+    }
+
+    private void AcceptHashtag(HashtagSuggestionItem item)
+    {
+        HashtagPopup.IsOpen = false;
+
+        string text = "#" + item.Tag + " ";
+        Editor.TextDocument.GetRange(_hashtagStart, _hashtagEnd).SetText(TextSetOptions.None, text);
+
+        int end = _hashtagStart + text.Length;
+        Editor.TextDocument.Selection.SetRange(end, end);
+        ViewModel.RecordHashtagUsed(item.Tag);
+    }
+
+    private void HashtagList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is HashtagSuggestionItem item)
+            AcceptHashtag(item);
+    }
+
+    /// <summary>Arrows, Enter/Tab and Escape drive the '#' popup while it's open. Returns whether the key was consumed.</summary>
+    private bool HandleHashtagKey(VirtualKey key)
+    {
+        if (!HashtagPopup.IsOpen)
+            return false;
+
+        int count = HashtagList.Items.Count;
+        switch (key)
+        {
+            case VirtualKey.Down:
+                HashtagList.SelectedIndex = Math.Min(count - 1, HashtagList.SelectedIndex + 1);
+                return true;
+            case VirtualKey.Up:
+                HashtagList.SelectedIndex = Math.Max(0, HashtagList.SelectedIndex - 1);
+                return true;
+            case VirtualKey.Tab:
+            case VirtualKey.Enter:
+                if (HashtagList.SelectedItem is not HashtagSuggestionItem item)
+                    return false;
+                AcceptHashtag(item);
+                return true;
+            case VirtualKey.Escape:
+                HashtagPopup.IsOpen = false;
+                return true;
+            default:
+                return false;
+        }
     }
 
     private async void Editor_SuggestionRequested(RichSuggestBox sender, SuggestionRequestedEventArgs args)
@@ -212,10 +367,6 @@ public sealed partial class ComposeBox : UserControl
                 if (epoch == _mentionRequestEpoch)
                     sender.ItemsSource = results;
             }
-            else if (args.Prefix == "#")
-            {
-                sender.ItemsSource = ViewModel.SearchHashtags(query);
-            }
         }
         finally
         {
@@ -228,11 +379,6 @@ public sealed partial class ComposeBox : UserControl
         if (args.Prefix == "@" && args.SelectedItem is MentionSuggestionItem mention)
         {
             args.DisplayText = mention.Handle;
-        }
-        else if (args.Prefix == "#" && args.SelectedItem is HashtagSuggestionItem hashtag)
-        {
-            args.DisplayText = hashtag.Tag;
-            ViewModel.RecordHashtagUsed(hashtag.Tag);
         }
         else
         {
@@ -351,13 +497,51 @@ public sealed partial class ComposeBox : UserControl
     public Brush InteractionBrush(bool custom) =>
         (Brush)Application.Current.Resources[custom ? "AccentTextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush"];
 
-    public double EditorMinHeight(bool expanded) => expanded ? 72 : 32;
+    public double EditorMinHeight(bool expanded, bool pageMode) => pageMode ? 220 : expanded ? 72 : 32;
+
+    public double EditorMaxHeight(bool pageMode) => pageMode ? 420 : 160;
+
+    /// <summary>Only offered while the draft mentions someone.</summary>
+    private void UpdateMentionsButton() =>
+        MentionsButton.Visibility = MentionScanPolicy.Handles(ViewModel.Text).Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    private void MentionsFlyout_Opening(object? sender, object e)
+    {
+        MentionsPanel.Children.Clear();
+        foreach (string handle in MentionScanPolicy.Handles(ViewModel.Text))
+        {
+            var button = new Button
+            {
+                Content = "@" + handle,
+                Tag = handle,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+            };
+            button.Click += (s, _) =>
+            {
+                MentionsFlyout.Hide();
+                if (s is FrameworkElement { Tag: string tag })
+                    ProfilePreviewWindow.Show(tag);
+            };
+            MentionsPanel.Children.Add(button);
+        }
+    }
+
+    private void PinButton_Click(object sender, RoutedEventArgs e)
+    {
+        // A draft already holds the popup open, so the click only records the user's intent for
+        // when the draft is gone.
+        _manuallyPinned = !_manuallyPinned;
+        UpdateLightDismissSuppression();
+    }
 
     public Visibility CollapsedIf(bool value) => value ? Visibility.Collapsed : Visibility.Visible;
 
     public string PostLabel(PostItem? replyTo, PostItem? quoteOf) => replyTo is not null ? "Reply" : quoteOf is not null ? "Quote" : "Post";
 
-    public string StatusText(string? uploadStatus) => uploadStatus ?? "Ctrl+Enter to post";
+    public string StatusText(string? uploadStatus, string? videoLimits) => uploadStatus ?? videoLimits ?? "Ctrl+Enter to post";
 
     public Brush CounterBrush(bool near, bool over)
     {
@@ -372,6 +556,12 @@ public sealed partial class ComposeBox : UserControl
 
     private void Editor_LostFocus(object sender, RoutedEventArgs e)
     {
+        HashtagPopup.IsOpen = false;
+
+        // The compose page is all compose box; there is nothing to collapse into.
+        if (IsPageMode)
+            return;
+
         // Clicking another control in this same box (Attach image/video, for example) also
         // fires the editor's LostFocus; only collapse once focus has actually left the whole
         // box, not just the text field, or attaching a photo before typing anything would
@@ -402,16 +592,57 @@ public sealed partial class ComposeBox : UserControl
 
     private void Editor_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key != VirtualKey.Enter)
-            return;
-
         bool ctrl = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(CoreVirtualKeyStates.Down);
-        if (!ctrl)
+
+        // Ctrl+Enter always posts, even with the '#' popup open.
+        if (!(ctrl && e.Key == VirtualKey.Enter) && HandleHashtagKey(e.Key))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key != VirtualKey.Enter || !ctrl)
             return;
 
         e.Handled = true;
         if (ViewModel.PostCommand.CanExecute(null))
             ViewModel.PostCommand.Execute(null);
+    }
+
+    /// <summary>Text dragged onto the editor itself is the editor's to insert at the caret; everything else is ours.</summary>
+    private bool LeaveToEditor(DragEventArgs e, ComposeDropKind kind) =>
+        kind == ComposeDropKind.Text && e.OriginalSource is DependencyObject source && IsWithin(source, Editor);
+
+    private void DropZone_DragOver(object sender, DragEventArgs e)
+    {
+        ComposeDropKind kind = ComposeViewModel.ClassifyDrop(e.DataView);
+        if (kind == ComposeDropKind.None || LeaveToEditor(e, kind))
+            return;
+
+        e.AcceptedOperation = DataPackageOperation.Copy;
+        e.DragUIOverride.Caption = ComposeDropPolicy.Caption(kind);
+        e.DragUIOverride.IsGlyphVisible = true;
+        e.Handled = true;
+    }
+
+    private async void DropZone_Drop(object sender, DragEventArgs e)
+    {
+        ComposeDropKind kind = ComposeViewModel.ClassifyDrop(e.DataView);
+        if (kind == ComposeDropKind.None || LeaveToEditor(e, kind))
+            return;
+
+        e.Handled = true;
+
+        // The drag data is only valid until the drop is completed, so hold it open across the awaits.
+        DragOperationDeferral deferral = e.GetDeferral();
+        try
+        {
+            await ViewModel.AcceptDropAsync(e.DataView);
+        }
+        finally
+        {
+            deferral.Complete();
+        }
     }
 
     /// <summary>

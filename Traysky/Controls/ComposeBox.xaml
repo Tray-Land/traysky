@@ -133,8 +133,10 @@
     </UserControl.Resources>
 
     <Border
+        x:Name="DropZone"
         Margin="12,6,12,4"
         Padding="10,8"
+        AllowDrop="True"
         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
         BorderThickness="1"
@@ -176,16 +178,43 @@
                 GotFocus="Editor_GotFocus"
                 ItemTemplateSelector="{StaticResource ComposeSuggestionTemplateSelector}"
                 LostFocus="Editor_LostFocus"
-                MaxHeight="160"
-                MinHeight="{x:Bind EditorMinHeight(ViewModel.IsExpanded), Mode=OneWay}"
+                MaxHeight="{x:Bind EditorMaxHeight(IsPageMode), Mode=OneWay}"
+                MinHeight="{x:Bind EditorMinHeight(ViewModel.IsExpanded, IsPageMode), Mode=OneWay}"
                 Paste="Editor_Paste"
                 PlaceholderText="{x:Bind ViewModel.Placeholder, Mode=OneWay}"
-                Prefixes="@#"
+                Prefixes="@"
                 PreviewKeyDown="Editor_PreviewKeyDown"
                 ScrollViewer.VerticalScrollBarVisibility="Auto"
                 SuggestionChosen="Editor_SuggestionChosen"
                 SuggestionRequested="Editor_SuggestionRequested"
                 TextChanged="Editor_TextChanged" />
+
+            <!--  '#' suggestions are ours, not the editor's: see HashtagFacetPolicy.TryFindOpenTag. Sits at the editor's bottom edge; none of its items take focus, so the editor keeps the caret.  -->
+            <Popup x:Name="HashtagPopup" VerticalOffset="2">
+                <Border
+                    x:Name="HashtagPopupBorder"
+                    MaxHeight="200"
+                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6">
+                    <ListView
+                        x:Name="HashtagList"
+                        AllowFocusOnInteraction="False"
+                        IsItemClickEnabled="True"
+                        IsTabStop="False"
+                        ItemClick="HashtagList_ItemClick"
+                        ItemTemplate="{StaticResource HashtagSuggestionTemplate}"
+                        SelectionMode="Single">
+                        <ListView.ItemContainerStyle>
+                            <Style BasedOn="{StaticResource DefaultListViewItemStyle}" TargetType="ListViewItem">
+                                <Setter Property="AllowFocusOnInteraction" Value="False" />
+                                <Setter Property="IsTabStop" Value="False" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                    </ListView>
+                </Border>
+            </Popup>
 
             <InfoBar
                 IsClosable="False"
@@ -278,6 +307,8 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
@@ -351,20 +382,62 @@
                         </Flyout>
                     </Button.Flyout>
                 </Button>
-                <TextBlock
+                <Button
+                    x:Name="MentionsButton"
                     Grid.Column="4"
-                    VerticalAlignment="Center"
-                    Style="{StaticResource SecondaryTextStyle}"
-                    Text="{x:Bind StatusText(ViewModel.UploadStatus), Mode=OneWay}"
-                    TextTrimming="CharacterEllipsis" />
-                <TextBlock
+                    Style="{StaticResource PostActionButtonStyle}"
+                    ToolTipService.ToolTip="Review mentioned profiles"
+                    Visibility="Collapsed">
+                    <FontIcon FontSize="14" Glyph="&#xE77B;" />
+                    <Button.Flyout>
+                        <Flyout x:Name="MentionsFlyout" Opening="MentionsFlyout_Opening" Placement="TopEdgeAlignedLeft">
+                            <StackPanel x:Name="MentionsPanel" Width="240" Spacing="2" />
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+                <ToggleButton
+                    x:Name="PinButton"
                     Grid.Column="5"
+                    MinWidth="0"
+                    MinHeight="28"
+                    Padding="6,4"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Click="PinButton_Click"
+                    ToolTipService.ToolTip="Keep this window open"
+                    Visibility="{x:Bind helpers:BindHelpers.VisibleIf(IsPageMode), Mode=OneWay}">
+                    <FontIcon FontSize="14" Glyph="&#xE718;" />
+                </ToggleButton>
+                <StackPanel
+                    Grid.Column="6"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        Style="{StaticResource SecondaryTextStyle}"
+                        Text="{x:Bind StatusText(ViewModel.UploadStatus, ViewModel.VideoLimitsText), Mode=OneWay}"
+                        TextTrimming="CharacterEllipsis" />
+                    <ProgressBar
+                        Width="80"
+                        VerticalAlignment="Center"
+                        Maximum="1"
+                        Value="{x:Bind ViewModel.UploadProgressValue, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.HasUploadProgress, Mode=OneWay}" />
+                    <HyperlinkButton
+                        Padding="4,0"
+                        VerticalAlignment="Center"
+                        Command="{x:Bind ViewModel.CancelUploadCommand}"
+                        Content="Cancel"
+                        Visibility="{x:Bind ViewModel.CanCancelUpload, Mode=OneWay}" />
+                </StackPanel>
+                <TextBlock
+                    Grid.Column="7"
                     VerticalAlignment="Center"
                     FontSize="12"
                     Foreground="{x:Bind CounterBrush(ViewModel.IsNearLimit, ViewModel.IsOverLimit), Mode=OneWay}"
                     Text="{x:Bind ViewModel.Counter, Mode=OneWay}" />
                 <Button
-                    Grid.Column="6"
+                    Grid.Column="8"
                     MinWidth="64"
                     Command="{x:Bind ViewModel.PostCommand}"
                     Style="{StaticResource AccentButtonStyle}">
