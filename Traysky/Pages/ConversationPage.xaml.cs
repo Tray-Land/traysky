@@ -41,6 +41,7 @@ public sealed partial class ConversationPage : Page
         Loaded += OnLoaded;
 
         ViewModel.MessagesAppended += OnMessagesAppended;
+        ViewModel.Closed += OnConversationClosed;
 
         _pollTimer = DispatcherQueue.CreateTimer();
         _pollTimer.Interval = PollInterval;
@@ -170,10 +171,76 @@ public sealed partial class ConversationPage : Page
         }
     }
 
+    private void DeleteForMe_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: MessageItem message } button)
+        {
+            CloseOpenFlyouts(button);
+            _ = ViewModel.DeleteForMeAsync(message);
+        }
+    }
+
+    private void ConversationMenu_Opening(object? sender, object e)
+    {
+        if (ViewModel.Conversation is not { } conversation)
+            return;
+
+        ChatConversationMenu menu = ChatConversationMenuPolicy.For(conversation.IsRequest, conversation.IsMuted, conversation.IsGroup);
+        ConversationMenu.Items.Clear();
+
+        if (menu.ShowAccept)
+        {
+            MenuFlyoutItem accept = new() { Text = "Accept request", Icon = new FontIcon { Glyph = "" } };
+            accept.Click += (_, _) => ViewModel.AcceptCommand.Execute(null);
+            ConversationMenu.Items.Add(accept);
+        }
+
+        if (menu.ShowGroupInfo)
+        {
+            MenuFlyoutItem info = new() { Text = "Group info and members", Icon = new FontIcon { Glyph = "" } };
+            info.Click += (_, _) => GroupInfoPage.Open(conversation);
+            ConversationMenu.Items.Add(info);
+        }
+
+        if (menu.ShowMute || menu.ShowUnmute)
+        {
+            MenuFlyoutItem mute = new()
+            {
+                Text = menu.ShowMute ? "Mute conversation" : "Unmute conversation",
+                Icon = new FontIcon { Glyph = menu.ShowMute ? "" : "" }
+            };
+            mute.Click += (_, _) => ViewModel.ToggleMuteCommand.Execute(null);
+            ConversationMenu.Items.Add(mute);
+        }
+
+        MenuFlyoutItem leave = new() { Text = menu.LeaveLabel, Icon = new FontIcon { Glyph = "" } };
+        leave.Click += async (_, _) =>
+        {
+            if (await Helpers.ChatDialogs.ConfirmAsync(XamlRoot, menu.LeaveLabel + "?", menu.LeavePrompt, menu.LeaveButton))
+                await ViewModel.LeaveAsync();
+        };
+        ConversationMenu.Items.Add(leave);
+    }
+
+    private void OnConversationClosed(object? sender, EventArgs e)
+    {
+        if (NavigationService.Instance.CanGoBack)
+            NavigationService.Instance.GoBack();
+    }
+
     private void Header_Tapped(object sender, TappedRoutedEventArgs e)
     {
+        // The options button lives in the header; its taps are not "open the profile".
+        for (DependencyObject? node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, Header); node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is Button)
+                return;
+        }
+
         if (ViewModel.Conversation is { IsGroup: false, OtherProfileKey.Length: > 0 } conversation)
             ProfilePage.Open(conversation.OtherProfileKey);
+        else if (ViewModel.Conversation is { IsGroup: true, IsRequest: false } group)
+            GroupInfoPage.Open(group);
     }
 
     private static ScrollViewer? FindScrollViewer(DependencyObject root)

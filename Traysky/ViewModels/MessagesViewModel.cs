@@ -176,6 +176,92 @@ public sealed partial class MessagesViewModel : ObservableObject
         IsEmpty = false;
     }
 
+    /// <summary>Something changed in chat that the loaded list doesn't show; the next visit reloads it.</summary>
+    public void Invalidate() => _loadedAtUtc = DateTimeOffset.MinValue;
+
+    /// <summary>Drops a conversation that was left or declined.</summary>
+    public void Remove(string conversationId)
+    {
+        ConversationItem? item = Items.FirstOrDefault(i => i.Id == conversationId);
+        if (item is null)
+            return;
+
+        ChatService.Instance.ConversationRead(item);
+        Items.Remove(item);
+        IsEmpty = Items.Count == 0;
+    }
+
+    /// <summary>Accepts a request without opening it. Shows at once, undone if the server refuses.</summary>
+    [RelayCommand]
+    private async Task AcceptRequestAsync(ConversationItem? conversation)
+    {
+        if (conversation is null || !conversation.IsRequest)
+            return;
+
+        conversation.IsRequest = false;
+        ChatService.Instance.UpdateUnreadFrom(Items);
+        if (PreviewMode.IsEnabled)
+            return;
+
+        if (!await ChatCall(async agent =>
+            {
+                var r = await agent.AcceptConversation(conversation.Id);
+                return (r.Succeeded, r.StatusCode, r.AtErrorDetail);
+            }, "Accept"))
+        {
+            conversation.IsRequest = true;
+            ChatService.Instance.UpdateUnreadFrom(Items);
+        }
+    }
+
+    /// <summary>Declines a request: it leaves the list at once and comes back if the server refuses.</summary>
+    [RelayCommand]
+    private async Task DeclineRequestAsync(ConversationItem? conversation)
+    {
+        if (conversation is null || !conversation.IsRequest)
+            return;
+
+        int index = Items.IndexOf(conversation);
+        if (index < 0)
+            return;
+
+        Items.RemoveAt(index);
+        IsEmpty = Items.Count == 0;
+        if (PreviewMode.IsEnabled)
+            return;
+
+        if (!await ChatCall(async agent =>
+            {
+                var r = await agent.LeaveConversation(conversation.Id);
+                return (r.Succeeded, r.StatusCode, r.AtErrorDetail);
+            }, "Decline"))
+        {
+            Items.Insert(Math.Min(index, Items.Count), conversation);
+            IsEmpty = false;
+        }
+    }
+
+    private async Task<bool> ChatCall(Func<idunno.Bluesky.BlueskyAgent, Task<(bool Ok, System.Net.HttpStatusCode Status, AtErrorDetail? Detail)>> call, string what)
+    {
+        try
+        {
+            BlueskySessionService session = BlueskySessionService.Instance;
+            await session.EnsureAuthenticatedAsync();
+            (bool ok, System.Net.HttpStatusCode status, AtErrorDetail? detail) = await call(session.Agent);
+            if (ok)
+                return true;
+
+            Error = status == 0 ? "Couldn't reach Bluesky. Nothing was changed." : $"{what} didn't go through.";
+            LogService.Warn("Chat", $"{what} failed: {(int)status} {detail?.Error}");
+        }
+        catch (Exception ex)
+        {
+            Error = $"{what} didn't go through.";
+            LogService.Warn("Chat", $"{what} threw: {ex.Message}");
+        }
+        return false;
+    }
+
     private void Replace(IEnumerable<ConversationItem> conversations)
     {
         Items.Clear();

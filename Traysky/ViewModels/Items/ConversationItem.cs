@@ -14,11 +14,13 @@ public sealed partial class ConversationItem : ObservableObject
 {
     public string Id { get; init; } = string.Empty;
 
-    /// <summary>The other person's name in a 1:1 conversation, or the group's name.</summary>
-    public string Title { get; init; } = string.Empty;
+    /// <summary>The other person's name in a 1:1 conversation, or the group's name (changes when the group is renamed).</summary>
+    [ObservableProperty]
+    public partial string Title { get; set; } = string.Empty;
 
     /// <summary>"@handle" for a 1:1 conversation, "N members" for a group.</summary>
-    public string Subtitle { get; init; } = string.Empty;
+    [ObservableProperty]
+    public partial string Subtitle { get; set; } = string.Empty;
 
     public Uri? AvatarUri { get; init; }
 
@@ -27,7 +29,18 @@ public sealed partial class ConversationItem : ObservableObject
 
     public bool IsGroup { get; init; }
 
-    public bool IsMuted { get; init; }
+    /// <summary>The signed-in account owns this group: it renames, adds and removes people and runs the join link.</summary>
+    public bool IsOwner { get; init; }
+
+    /// <summary>The group takes no new messages (locked by its owner or by moderation).</summary>
+    public bool IsLocked { get; set; }
+
+    /// <summary>People in the group, and the most it can hold; zero for a 1:1 conversation.</summary>
+    public long MemberCount { get; set; }
+    public long MemberLimit { get; init; }
+
+    [ObservableProperty]
+    public partial bool IsMuted { get; set; }
 
     /// <summary>Everyone in the conversation, by DID, so a message can show who sent it.</summary>
     public IReadOnlyDictionary<string, ActorItem> Members { get; init; } = new Dictionary<string, ActorItem>();

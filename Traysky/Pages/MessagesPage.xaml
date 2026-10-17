@@ -26,11 +26,36 @@
                 </Style>
             </ListView.ItemContainerStyle>
             <ListView.Header>
-                <TextBlock
-                    Margin="12,4,12,8"
-                    FontSize="18"
-                    FontWeight="SemiBold"
-                    Text="Messages" />
+                <Grid Margin="12,4,12,8" ColumnSpacing="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="18"
+                        FontWeight="SemiBold"
+                        Text="Messages" />
+                    <Button
+                        Grid.Column="1"
+                        Padding="8"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Click="JoinGroup_Click"
+                        ToolTipService.ToolTip="Join a group with a link">
+                        <FontIcon FontSize="14" Glyph="&#xE71B;" />
+                    </Button>
+                    <Button
+                        Grid.Column="2"
+                        Padding="8"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Click="NewGroup_Click"
+                        ToolTipService.ToolTip="New group">
+                        <FontIcon FontSize="14" Glyph="&#xE902;" />
+                    </Button>
+                </Grid>
             </ListView.Header>
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="items:ConversationItem">
@@ -70,7 +95,7 @@
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                     Glyph="&#xE74F;"
                                     ToolTipService.ToolTip="Muted"
-                                    Visibility="{x:Bind IsMuted}" />
+                                    Visibility="{x:Bind IsMuted, Mode=OneWay}" />
                             </StackPanel>
                             <TextBlock
                                 MaxLines="2"
@@ -78,6 +103,22 @@
                                 Text="{x:Bind LastMessagePreview, Mode=OneWay}"
                                 TextTrimming="CharacterEllipsis"
                                 TextWrapping="Wrap" />
+                            <!--  A request waits for an answer: accept moves it to the inbox, decline removes it.  -->
+                            <StackPanel
+                                Margin="0,6,0,0"
+                                Orientation="Horizontal"
+                                Spacing="8"
+                                Visibility="{x:Bind IsRequest, Mode=OneWay}">
+                                <Button
+                                    Click="Accept_Click"
+                                    Content="Accept"
+                                    Style="{StaticResource AccentButtonStyle}"
+                                    Tag="{x:Bind}" />
+                                <Button
+                                    Click="Decline_Click"
+                                    Content="Decline"
+                                    Tag="{x:Bind}" />
+                            </StackPanel>
                         </StackPanel>
 
                         <StackPanel

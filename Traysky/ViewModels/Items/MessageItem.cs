@@ -26,6 +26,13 @@ public sealed partial class MessageItem : ObservableObject
 
     public bool IsDeleted { get; init; }
 
+    /// <summary>A line from the group itself ("Alice added Bob"), shown centred rather than as a bubble; the line is in <see cref="Text"/>.</summary>
+    public bool IsSystem { get; init; }
+
+    public Visibility BubbleVisibility => IsSystem ? Visibility.Collapsed : Visibility.Visible;
+
+    public Visibility SystemVisibility => IsSystem ? Visibility.Visible : Visibility.Collapsed;
+
     public string Text { get; init; } = string.Empty;
     public IReadOnlyList<TextSegment> Segments { get; init; } = [];
 
@@ -44,6 +51,17 @@ public sealed partial class MessageItem : ObservableObject
 
     public bool HasReacted(string did, string value) => Reactions.Contains((did, value));
 
+    /// <summary>Swaps in the reactions the server reports, when they differ from what is shown.</summary>
+    public void ReplaceReactions(IReadOnlyList<(string Did, string Value)> latest)
+    {
+        if (Reactions.Count == latest.Count && Reactions.All(r => latest.Contains(r)))
+            return;
+
+        Reactions.Clear();
+        Reactions.AddRange(latest);
+        ReactionsText = ChatMapper.SummarizeReactions(Reactions.Select(r => r.Value));
+    }
+
     public void AddReaction(string did, string value)
     {
         if (!HasReacted(did, value))
@@ -59,8 +77,8 @@ public sealed partial class MessageItem : ObservableObject
             ReactionsText = ChatMapper.SummarizeReactions(Reactions.Select(r => r.Value));
     }
 
-    /// <summary>The "..." options button ends received messages; deleted ones have nothing to offer.</summary>
-    public Visibility OptionsButtonVisibility => IsMine || IsDeleted ? Visibility.Collapsed : Visibility.Visible;
+    /// <summary>The "..." options button ends every message (react, copy, delete for me); deleted ones have nothing to offer.</summary>
+    public Visibility OptionsButtonVisibility => IsDeleted || IsSystem ? Visibility.Collapsed : Visibility.Visible;
 
     /// <summary>First message of a burst (see <see cref="ChatThreadPolicy.StartsRun"/>); set by the list
     /// as messages arrive, and can change when older messages are loaded above it.</summary>

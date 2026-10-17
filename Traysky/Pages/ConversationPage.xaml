@@ -31,6 +31,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <PersonPicture
                 Width="32"
@@ -47,6 +48,20 @@
                     Text="{x:Bind ViewModel.Conversation.Subtitle, Mode=OneWay}"
                     TextTrimming="CharacterEllipsis" />
             </StackPanel>
+
+            <!--  Mute, accept and leave; the items are built when it opens, since they depend on the conversation's state.  -->
+            <Button
+                Grid.Column="2"
+                Padding="8"
+                VerticalAlignment="Center"
+                Background="Transparent"
+                BorderThickness="0"
+                ToolTipService.ToolTip="Conversation options">
+                <FontIcon FontSize="14" Glyph="&#xE712;" />
+                <Button.Flyout>
+                    <MenuFlyout x:Name="ConversationMenu" Opening="ConversationMenu_Opening" />
+                </Button.Flyout>
+            </Button>
         </Grid>
 
         <InfoBar
@@ -91,11 +106,23 @@
             </ListView.Header>
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="items:MessageItem">
+                  <Grid>
+                    <!--  A line from the group itself ("Alice added Bob"): centred, no bubble.  -->
+                    <TextBlock
+                        Margin="0,10,0,2"
+                        HorizontalAlignment="Center"
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{x:Bind Text}"
+                        TextAlignment="Center"
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind SystemVisibility}" />
                     <StackPanel
                         MaxWidth="300"
                         Margin="{x:Bind RunMargin, Mode=OneWay}"
                         HorizontalAlignment="{x:Bind Alignment}"
-                        Spacing="2">
+                        Spacing="2"
+                        Visibility="{x:Bind BubbleVisibility}">
                         <StackPanel
                             Margin="4,0,4,2"
                             HorizontalAlignment="{x:Bind Alignment}"
@@ -152,6 +179,12 @@
                                                 Content="Copy text"
                                                 Tag="{x:Bind}"
                                                 Visibility="{x:Bind HasText}" />
+                                            <Button
+                                                HorizontalAlignment="Stretch"
+                                                Click="DeleteForMe_Click"
+                                                Content="Delete for me"
+                                                ToolTipService.ToolTip="Removes it from your view only; they keep their copy"
+                                                Tag="{x:Bind}" />
                                         </StackPanel>
                                     </Flyout>
                                 </Button.Flyout>
@@ -194,6 +227,7 @@
                             Text="{x:Bind ReactionsText, Mode=OneWay}"
                             Visibility="{x:Bind HasReactions, Mode=OneWay}" />
                     </StackPanel>
+                  </Grid>
                 </DataTemplate>
             </ListView.ItemTemplate>
         </ListView>
@@ -238,6 +272,7 @@
                 x:Name="DraftBox"
                 MaxHeight="120"
                 AcceptsReturn="True"
+                IsEnabled="{x:Bind ViewModel.CanType, Mode=OneWay}"
                 MaxLength="1000"
                 PlaceholderText="Write a message"
                 PreviewKeyDown="DraftBox_PreviewKeyDown"

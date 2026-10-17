@@ -31,6 +31,8 @@ public sealed partial class ConversationViewModel : ObservableObject
     public ObservableCollection<MessageItem> Messages { get; } = [];
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanSend), nameof(CanType))]
+    [NotifyCanExecuteChangedFor(nameof(SendCommand))]
     public partial ConversationItem? Conversation { get; private set; }
 
     [ObservableProperty]
@@ -60,7 +62,10 @@ public sealed partial class ConversationViewModel : ObservableObject
 
     public bool HasOlder => !string.IsNullOrEmpty(_olderCursor);
 
-    public bool CanSend => !IsSending && ChatThreadPolicy.CanSend(Draft);
+    public bool CanSend => !IsSending && CanType && ChatThreadPolicy.CanSend(Draft);
+
+    /// <summary>False in a locked group, where nobody can send.</summary>
+    public bool CanType => Conversation is not { IsLocked: true };
 
     /// <summary>Raised after messages were added at the bottom (loaded, polled or sent), so the page can follow them.</summary>
     public event EventHandler<bool>? MessagesAppended;
@@ -159,26 +164,17 @@ public sealed partial class ConversationViewModel : ObservableObject
             if (!await BlueskySessionService.Instance.EnsureAuthenticatedAsync())
                 return;
 
-            AtProtoHttpResult<ChatMessages> result = await BlueskySessionService.Instance.Agent.GetMessages(Conversation.Id, limit: PollSize);
-            if (!result.Succeeded || result.Result is null)
+            // The log says exactly what changed. Until it has given us a cursor to resume from
+            // (or when it can't be reached) read the latest messages directly instead.
+            IReadOnlyList<LogBase>? log = await ChatService.Instance.SyncLogAsync();
+            if (log is null || !ChatService.Instance.HasLogCursor)
+            {
+                await PollMessagesAsync(refreshReactions: false);
                 return;
+            }
 
-            List<MessageItem> fresh = Map(result.Result).Where(m => !_known.Contains(m.Id)).ToList();
-            if (fresh.Count == 0)
-                return;
-
-            Append(fresh, newestFirst: true);
-            IsEmpty = false;
-            MessagesAppended?.Invoke(this, false);
-
-            MessageItem newest = Messages[^1];
-            string text = newest.Text.ReplaceLineEndings(" ");
-            Conversation.LastMessagePreview = newest.IsMine ? "You: " + text : text;
-            Conversation.LastMessageAt = newest.SentAt;
-
-            // New messages from them are unread on the server until we say otherwise.
-            if (fresh.Any(m => !m.IsMine))
-                await MarkReadAsync(evenIfReadLocally: true);
+            if (log.Count > 0)
+                await ApplyLogAsync(log);
         }
         catch (Exception ex)
         {
@@ -188,6 +184,241 @@ public sealed partial class ConversationViewModel : ObservableObject
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>The conversation was left or declined, here or on another device: the page should go back.</summary>
+    public event EventHandler? Closed;
+
+    private async Task ApplyLogAsync(IReadOnlyList<LogBase> log)
+    {
+        ConversationItem conversation = Conversation!;
+        ChatLogDelta delta = ChatThreadPolicy.Reduce(log.Select(ChatMapper.ToLogEntry), conversation.Id, _known);
+
+        if (delta.InboxChanged)
+            MessagesViewModel.Instance.Invalidate();
+
+        if (delta.Muted is bool muted)
+            conversation.IsMuted = muted;
+
+        if (delta.GroupChanged && conversation.IsGroup)
+            await RefreshGroupAsync(conversation);
+
+        if (delta.LeftConversation)
+        {
+            MessagesViewModel.Instance.Remove(conversation.Id);
+            Closed?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        foreach (string id in delta.DeletedMessageIds)
+        {
+            MessageItem? gone = Messages.FirstOrDefault(m => m.Id == id);
+            if (gone is not null)
+                Messages.Remove(gone);
+        }
+        if (delta.DeletedMessageIds.Count > 0)
+        {
+            UpdateRuns();
+            IsEmpty = Messages.Count == 0;
+        }
+
+        if (delta.NewMessageIds.Count > 0)
+        {
+            Dictionary<string, MessageViewBase> created = new(StringComparer.Ordinal);
+            foreach (CreateMessage entry in log.OfType<CreateMessage>())
+            {
+                if (entry.ConversationId == conversation.Id && ChatMapper.MessageIdOf(entry.Message) is { } id)
+                    created.TryAdd(id, entry.Message);
+            }
+
+            List<MessageItem> fresh = Map(delta.NewMessageIds.Where(created.ContainsKey).Select(id => created[id]));
+            if (fresh.Count > 0)
+                await AppendFreshAsync(fresh);
+        }
+
+        if (delta.ReactionsChanged)
+            await PollMessagesAsync(refreshReactions: true);
+    }
+
+    /// <summary>A member, the name, the lock or the join link of the open group changed: pick up the new name, size and lock state.</summary>
+    private async Task RefreshGroupAsync(ConversationItem conversation)
+    {
+        GroupDetail? detail = await GroupChatService.GetDetailAsync(conversation.Id);
+        if (detail is null)
+            return;
+
+        conversation.Title = detail.Conversation.Title;
+        conversation.Subtitle = detail.Conversation.Subtitle;
+        conversation.MemberCount = detail.Conversation.MemberCount;
+        if (conversation.IsLocked != detail.Conversation.IsLocked)
+        {
+            conversation.IsLocked = detail.Conversation.IsLocked;
+            OnPropertyChanged(nameof(CanType));
+            OnPropertyChanged(nameof(CanSend));
+            SendCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>Reads the latest page of messages: anything new is added, and reactions on known ones can be refreshed.</summary>
+    private async Task PollMessagesAsync(bool refreshReactions)
+    {
+        AtProtoHttpResult<ChatMessages> result = await BlueskySessionService.Instance.Agent.GetMessages(Conversation!.Id, limit: PollSize);
+        if (!result.Succeeded || result.Result is null)
+            return;
+
+        List<MessageItem> mapped = Map(result.Result);
+
+        if (refreshReactions)
+        {
+            foreach (MessageItem latest in mapped)
+            {
+                MessageItem? shown = Messages.FirstOrDefault(m => m.Id == latest.Id);
+                if (shown is not null)
+                    shown.ReplaceReactions(latest.Reactions);
+            }
+        }
+
+        List<MessageItem> fresh = mapped.Where(m => !_known.Contains(m.Id)).ToList();
+        if (fresh.Count > 0)
+            await AppendFreshAsync(fresh, newestFirst: true);
+    }
+
+    private async Task AppendFreshAsync(List<MessageItem> fresh, bool newestFirst = false)
+    {
+        Append(fresh, newestFirst);
+        IsEmpty = false;
+        MessagesAppended?.Invoke(this, false);
+
+        MessageItem newest = Messages[^1];
+        string text = newest.Text.ReplaceLineEndings(" ");
+        Conversation!.LastMessagePreview = newest.IsMine ? "You: " + text : text;
+        Conversation.LastMessageAt = newest.SentAt;
+
+        // New messages from them are unread on the server until we say otherwise.
+        if (fresh.Any(m => !m.IsMine))
+            await MarkReadAsync(evenIfReadLocally: true);
+    }
+
+    /// <summary>Hides a message for this account only; the other side keeps it. Gone at once, put back if the server refuses.</summary>
+    public async Task DeleteForMeAsync(MessageItem message)
+    {
+        if (Conversation is null)
+            return;
+
+        int index = Messages.IndexOf(message);
+        if (index < 0)
+            return;
+
+        Messages.RemoveAt(index);
+        UpdateRuns();
+        IsEmpty = Messages.Count == 0;
+        if (PreviewMode.IsEnabled)
+            return;
+
+        void Restore(string error)
+        {
+            Messages.Insert(Math.Min(index, Messages.Count), message);
+            UpdateRuns();
+            IsEmpty = false;
+            Error = error;
+        }
+
+        try
+        {
+            await BlueskySessionService.Instance.EnsureAuthenticatedAsync();
+            var result = await BlueskySessionService.Instance.Agent.DeleteMessageForSelf(Conversation.Id, message.Id);
+            if (!result.Succeeded)
+            {
+                Restore(result.StatusCode == 0 ? "Couldn't reach Bluesky. The message wasn't deleted." : "The message wasn't deleted.");
+                LogService.Warn("Chat", $"DeleteMessageForSelf failed: {(int)result.StatusCode} {result.AtErrorDetail?.Error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Restore("The message wasn't deleted.");
+            LogService.Warn("Chat", $"DeleteMessageForSelf threw: {ex.Message}");
+        }
+    }
+
+    /// <summary>Mutes or unmutes the conversation. Shows at once, undone if the server refuses.</summary>
+    [RelayCommand]
+    private async Task ToggleMuteAsync()
+    {
+        if (Conversation is null)
+            return;
+
+        ConversationItem conversation = Conversation;
+        bool mute = !conversation.IsMuted;
+        conversation.IsMuted = mute;
+        if (PreviewMode.IsEnabled)
+            return;
+
+        try
+        {
+            await BlueskySessionService.Instance.EnsureAuthenticatedAsync();
+            bool ok;
+            System.Net.HttpStatusCode status;
+            AtErrorDetail? detail;
+            if (mute)
+            {
+                var result = await BlueskySessionService.Instance.Agent.MuteConversation(conversation.Id);
+                (ok, status, detail) = (result.Succeeded, result.StatusCode, result.AtErrorDetail);
+            }
+            else
+            {
+                var result = await BlueskySessionService.Instance.Agent.UnmuteConversation(conversation.Id);
+                (ok, status, detail) = (result.Succeeded, result.StatusCode, result.AtErrorDetail);
+            }
+
+            if (!ok)
+            {
+                conversation.IsMuted = !mute;
+                Error = status == 0 ? "Couldn't reach Bluesky. The change wasn't saved." : "The change wasn't saved.";
+                LogService.Warn("Chat", $"{(mute ? "MuteConversation" : "UnmuteConversation")} failed: {(int)status} {detail?.Error}");
+            }
+            else
+            {
+                ChatService.Instance.MuteChanged(conversation);
+            }
+        }
+        catch (Exception ex)
+        {
+            conversation.IsMuted = !mute;
+            Error = "The change wasn't saved.";
+            LogService.Warn("Chat", $"Muting threw: {ex.Message}");
+        }
+    }
+
+    /// <summary>Leaves (or, for a request, declines) the conversation and drops it from the list.</summary>
+    public async Task LeaveAsync()
+    {
+        if (Conversation is null)
+            return;
+
+        ConversationItem conversation = Conversation;
+        if (!PreviewMode.IsEnabled)
+        {
+            try
+            {
+                await BlueskySessionService.Instance.EnsureAuthenticatedAsync();
+                var result = await BlueskySessionService.Instance.Agent.LeaveConversation(conversation.Id);
+                if (!result.Succeeded)
+                {
+                    Error = result.StatusCode == 0 ? "Couldn't reach Bluesky. You're still in this conversation." : "You're still in this conversation.";
+                    LogService.Warn("Chat", $"LeaveConversation failed: {(int)result.StatusCode} {result.AtErrorDetail?.Error}");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Error = "You're still in this conversation.";
+                LogService.Warn("Chat", $"LeaveConversation threw: {ex.Message}");
+                return;
+            }
+        }
+
+        MessagesViewModel.Instance.Remove(conversation.Id);
+        Closed?.Invoke(this, EventArgs.Empty);
     }
 
     [RelayCommand(CanExecute = nameof(CanSend))]

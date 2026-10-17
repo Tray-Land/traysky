@@ -27,9 +27,13 @@ public sealed partial class ChatService : ObservableObject
     /// <summary>Reopening the flyout re-checks at most this often.</summary>
     private static readonly TimeSpan RecheckAfter = TimeSpan.FromSeconds(30);
 
-    private const int ProbePageSize = 50;
+    /// <summary>One sync follows the log's cursor at most this many pages, so a long absence can't spin.</summary>
+    private const int MaxLogPages = 5;
 
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly SemaphoreSlim _logGate = new(1, 1);
+    private string? _logCursor;
+    private string? _logCursorDid;
     private DateTimeOffset _checkedAtUtc = DateTimeOffset.MinValue;
 
     private ChatService()
@@ -78,7 +82,7 @@ public sealed partial class ChatService : ObservableObject
             if (!await session.EnsureAuthenticatedAsync())
                 return;
 
-            AtProtoHttpResult<Conversations> result = await session.Agent.ListConversations(limit: ProbePageSize, status: ConversationStatus.Accepted);
+            AtProtoHttpResult<UnreadConversationCounts> result = await session.Agent.GetUnreadCounts(includeGroupChats: true);
 
             ChatAccess access = ChatAccessPolicy.FromProbe(result.Succeeded && result.Result is not null, (int)result.StatusCode, result.AtErrorDetail?.Error);
             if (access == ChatAccess.Unknown)
@@ -104,7 +108,7 @@ public sealed partial class ChatService : ObservableObject
             if (!CanUseChat)
                 LogService.Info("Chat", "Direct messages are available");
             CanUseChat = true;
-            UnreadCount = result.Result!.Count(c => c.UnreadCount > 0 && !c.Muted);
+            UnreadCount = ChatConversationMenuPolicy.BadgeCount(result.Result!.UnreadAcceptedConversations);
         }
         catch (Exception ex)
         {
@@ -114,6 +118,81 @@ public sealed partial class ChatService : ObservableObject
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>
+    /// Everything that happened in chat since the last call, oldest first, followed from a cursor
+    /// saved per account so the next launch resumes where this one stopped. The first ever call
+    /// has nothing to resume from and returns nothing but a starting point. Null means the call
+    /// couldn't be made (offline, signed out, another sync already running); try again later.
+    /// </summary>
+    public async Task<IReadOnlyList<LogBase>?> SyncLogAsync()
+    {
+        BlueskySessionService session = BlueskySessionService.Instance;
+        if (!session.IsSignedIn || PreviewMode.IsEnabled || session.Did is not { Length: > 0 } did)
+            return null;
+
+        if (!await _logGate.WaitAsync(0))
+            return null;
+
+        try
+        {
+            if (!await session.EnsureAuthenticatedAsync())
+                return null;
+
+            if (_logCursorDid != did)
+            {
+                _logCursor = SettingsService.GetChatLogCursor(did);
+                _logCursorDid = did;
+            }
+
+            bool baseline = _logCursor is null;
+            List<LogBase> entries = [];
+
+            for (int page = 0; page < MaxLogPages; page++)
+            {
+                AtProtoHttpResult<Logs> result = await session.Agent.GetConversationLog(_logCursor);
+                if (!result.Succeeded || result.Result is null)
+                {
+                    LogService.Warn("Chat", $"Chat log failed: {(int)result.StatusCode} {result.AtErrorDetail?.Error}");
+                    // A cursor the server no longer accepts would fail forever: start again from now.
+                    if ((int)result.StatusCode is >= 400 and < 500 and not 401 and not 429)
+                        Remember(did, null);
+                    return entries.Count > 0 ? entries : null;
+                }
+
+                string? next = ChatThreadPolicy.NextLogCursor(_logCursor, result.Result.Cursor);
+                entries.AddRange(result.Result);
+                bool moved = !string.Equals(next, _logCursor, StringComparison.Ordinal);
+                Remember(did, next);
+
+                if (!moved || result.Result.Count == 0)
+                    break;
+            }
+
+            return baseline ? [] : entries;
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("Chat", $"Chat log threw: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            _logGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// False until the log has handed back a cursor. Callers fall back to reading messages
+    /// directly meanwhile, since a log call without a cursor to resume from can miss events.
+    /// </summary>
+    public bool HasLogCursor => _logCursor is not null;
+
+    private void Remember(string did, string? cursor)
+    {
+        _logCursor = cursor;
+        SettingsService.SetChatLogCursor(did, cursor);
     }
 
     /// <summary>The Messages list has just loaded; its first page is a fresher count than the last probe.</summary>
@@ -128,6 +207,9 @@ public sealed partial class ChatService : ObservableObject
         if (conversation.IsUnread && !conversation.IsMuted && !conversation.IsRequest && UnreadCount > 0)
             UnreadCount--;
     }
+
+    /// <summary>A conversation was just muted or unmuted; whether it counts toward the badge is the server's call, so ask again.</summary>
+    public void MuteChanged(ConversationItem conversation) => _ = CheckAsync(force: true);
 
     private void Reset()
     {

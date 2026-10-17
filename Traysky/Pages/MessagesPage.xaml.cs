@@ -2,6 +2,8 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
+using System.Linq;
+using Traysky.Services;
 using Traysky.ViewModels;
 using Traysky.ViewModels.Items;
 
@@ -54,6 +56,55 @@ public sealed partial class MessagesPage : Page
         if (e.ClickedItem is ConversationItem conversation)
             ConversationPage.Open(conversation);
     }
+
+    private void Accept_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: ConversationItem conversation })
+            ViewModel.AcceptRequestCommand.Execute(conversation);
+    }
+
+    private async void Decline_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: ConversationItem conversation })
+            return;
+
+        if (await Helpers.ChatDialogs.ConfirmAsync(XamlRoot, "Decline this request?", $"The request from {conversation.Title} is removed.", "Decline"))
+            ViewModel.DeclineRequestCommand.Execute(conversation);
+    }
+
+    private async void NewGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if (await Helpers.GroupDialogs.AskNewGroupAsync(XamlRoot) is not { } answer)
+            return;
+
+        ConversationItem? created;
+        if (PreviewMode.IsEnabled)
+        {
+            created = PreviewMode.SampleNewGroup(answer.Name, answer.Members.Count);
+        }
+        else
+        {
+            (created, string? error) = await GroupChatService.CreateAsync(answer.Name, answer.Members.Select(m => m.Did).ToList());
+            if (error is not null)
+            {
+                await Helpers.ModerationDialogs.ShowMessageAsync(XamlRoot, "Couldn't create the group", error);
+                return;
+            }
+        }
+
+        if (created is null)
+        {
+            // The group exists but the server didn't hand it back; the list will show it.
+            ViewModel.Invalidate();
+            _ = ViewModel.RefreshAsync();
+            return;
+        }
+
+        ViewModel.BringToTop(created);
+        ConversationPage.Open(created);
+    }
+
+    private async void JoinGroup_Click(object sender, RoutedEventArgs e) => await Helpers.GroupDialogs.JoinAsync(XamlRoot);
 
     private static ScrollViewer? FindScrollViewer(DependencyObject root)
     {
