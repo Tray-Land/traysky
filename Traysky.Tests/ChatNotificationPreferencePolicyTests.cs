@@ -26,7 +26,8 @@ public class ChatNotificationPreferencePolicyTests
     [TestMethod]
     public void Defaults_ArePushedFromEveryone()
     {
-        Assert.IsTrue(ChatNotificationPreferencePolicy.DefaultPush);
-        Assert.IsFalse(ChatNotificationPreferencePolicy.DefaultFollowsOnly);
+        Assert.AreEqual(
+            "Pushed, from everyone",
+            ChatNotificationPreferencePolicy.Summary(ChatNotificationPreferencePolicy.DefaultPush, ChatNotificationPreferencePolicy.DefaultFollowsOnly));
     }
 }

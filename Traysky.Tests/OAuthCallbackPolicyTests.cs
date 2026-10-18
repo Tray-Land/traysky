@@ -18,12 +18,12 @@ public class OAuthCallbackPolicyTests
         string host = new Uri(OAuthCallbackPolicy.ClientId).Host;
         string reversed = string.Join('.', host.Split('.').Reverse());
 
-        Assert.AreEqual(reversed, OAuthCallbackPolicy.Scheme);
+        Assert.AreEqual(OAuthCallbackPolicy.Scheme, reversed);
         StringAssert.StartsWith(OAuthCallbackPolicy.RedirectUri, OAuthCallbackPolicy.Scheme + ":/");
         Assert.IsFalse(OAuthCallbackPolicy.RedirectUri.StartsWith(OAuthCallbackPolicy.Scheme + "://", StringComparison.Ordinal));
 
         // Windows protocol names: lowercase, at most 39 characters.
-        Assert.AreEqual(OAuthCallbackPolicy.Scheme.ToLowerInvariant(), OAuthCallbackPolicy.Scheme);
+        Assert.AreEqual(OAuthCallbackPolicy.Scheme, OAuthCallbackPolicy.Scheme.ToLowerInvariant());
         Assert.IsTrue(OAuthCallbackPolicy.Scheme.Length <= 39);
     }
 

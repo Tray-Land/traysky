@@ -215,7 +215,7 @@ public sealed partial class ComposeBox : UserControl
 
     private string CurrentEditorText()
     {
-        Editor.TextDocument.GetText(TextGetOptions.NoHidden, out string text);
+        Editor.TextDocument!.GetText(TextGetOptions.NoHidden, out string text);
 
         // RichEditBox separates paragraphs with a lone \r. Bluesky (and the web client) expect \n,
         // and a bare \r gets dropped or ignored there, which flattened multi-paragraph posts.
@@ -227,7 +227,7 @@ public sealed partial class ComposeBox : UserControl
         _syncingFromViewModel = true;
         try
         {
-            Editor.TextDocument.SetText(TextSetOptions.None, text);
+            Editor.TextDocument!.SetText(TextSetOptions.None, text);
             Editor.TextDocument.Selection.StartPosition = int.MaxValue;
             Editor.TextDocument.Selection.EndPosition = int.MaxValue;
         }
@@ -254,7 +254,7 @@ public sealed partial class ComposeBox : UserControl
 
     private void UpdateHashtagPopup()
     {
-        if (!IsEditorReady || Editor.TextDocument.Selection.Length != 0)
+        if (!IsEditorReady || Editor.TextDocument!.Selection.Length != 0)
         {
             HashtagPopup.IsOpen = false;
             return;
@@ -292,7 +292,7 @@ public sealed partial class ComposeBox : UserControl
     /// </summary>
     private void PlaceHashtagPopup(int itemCount)
     {
-        Editor.TextDocument.Selection.GetRect(PointOptions.ClientCoordinates, out Windows.Foundation.Rect caret, out _);
+        Editor.TextDocument!.Selection.GetRect(PointOptions.ClientCoordinates, out Windows.Foundation.Rect caret, out _);
         if (caret.IsEmpty || double.IsNaN(caret.X))
             return;
 
@@ -311,7 +311,7 @@ public sealed partial class ComposeBox : UserControl
         HashtagPopup.IsOpen = false;
 
         string text = "#" + item.Tag + " ";
-        Editor.TextDocument.GetRange(_hashtagStart, _hashtagEnd).SetText(TextSetOptions.None, text);
+        Editor.TextDocument!.GetRange(_hashtagStart, _hashtagEnd).SetText(TextSetOptions.None, text);
 
         int end = _hashtagStart + text.Length;
         Editor.TextDocument.Selection.SetRange(end, end);
