@@ -10,8 +10,8 @@ namespace Traysky.Controls;
 /// <summary>
 /// Renders a post's embed: an image grid, a video thumbnail, a link card, or a quoted post.
 /// A still image opens full size in the popup itself, and a video plays inline in the popup's
-/// video overlay; link cards and quotes open in the browser. The hosting card supplies the post
-/// URL as a fallback for media that has no URL of its own.
+/// video overlay; a link card opens in the browser and a quote opens its post's thread page. The
+/// hosting card supplies the post URL as a fallback for media that has no URL of its own.
 /// </summary>
 public sealed partial class EmbedPresenter : UserControl
 {
@@ -103,6 +103,13 @@ public sealed partial class EmbedPresenter : UserControl
     private void Quote_Tapped(object sender, TappedRoutedEventArgs e)
     {
         e.Handled = true;
-        _ = RichTextBuilder.OpenAsync(Embed?.QuoteWebUrl);
+
+        // The quoted post opens as a thread page in the popup. A contained card (the profile
+        // window) never navigates the popup, so it - and a quote with no AT URI to load by -
+        // opens the post in the browser instead.
+        if (!IsContained && Embed?.QuoteAtUri is { } atUri)
+            Pages.PostPage.Open(atUri);
+        else
+            _ = RichTextBuilder.OpenAsync(Embed?.QuoteWebUrl);
     }
 }
