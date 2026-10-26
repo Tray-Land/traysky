@@ -360,7 +360,8 @@ public sealed partial class ShellPage : Page
 
         // After sleep the access token may have lapsed; renew it once up front rather than
         // letting every refresh below fail with AuthenticationRequiredException.
-        await BlueskySessionService.Instance.EnsureAuthenticatedAsync();
+        if (!await BlueskySessionService.Instance.EnsureAuthenticatedAsync())
+            return;
 
         _ = NotificationPollService.Instance.PollNowAsync();
         _ = ChatService.Instance.CheckAsync(force: true);

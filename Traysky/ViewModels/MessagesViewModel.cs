@@ -147,7 +147,11 @@ public sealed partial class MessagesViewModel : ObservableObject
                 return;
             }
 
-            await session.EnsureAuthenticatedAsync();
+            if (!await session.EnsureAuthenticatedAsync())
+            {
+                Error = session.AuthenticationError;
+                return;
+            }
 
             ChatListMode requested = Mode;
             Page result = await FetchAsync(session, null);
@@ -376,7 +380,11 @@ public sealed partial class MessagesViewModel : ObservableObject
         try
         {
             BlueskySessionService session = BlueskySessionService.Instance;
-            await session.EnsureAuthenticatedAsync();
+            if (!await session.EnsureAuthenticatedAsync())
+            {
+                Error = session.AuthenticationError;
+                return false;
+            }
             (bool ok, System.Net.HttpStatusCode status, AtErrorDetail? detail) = await call(session.Agent);
             if (ok)
                 return true;

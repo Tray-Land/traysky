@@ -97,6 +97,12 @@ public sealed partial class NotificationsViewModel : ObservableObject
                 return;
             }
 
+            if (!await BlueskySessionService.Instance.EnsureAuthenticatedAsync())
+            {
+                Error = BlueskySessionService.Instance.AuthenticationError;
+                return;
+            }
+
             // Captured before the request so marking seen later cannot swallow anything that
             // arrives while the list is on screen.
             DateTimeOffset fetchedAt = DateTimeOffset.UtcNow;
@@ -151,6 +157,12 @@ public sealed partial class NotificationsViewModel : ObservableObject
         IsLoadingMore = true;
         try
         {
+            if (!await BlueskySessionService.Instance.EnsureAuthenticatedAsync())
+            {
+                Error = BlueskySessionService.Instance.AuthenticationError;
+                return;
+            }
+
             AtProtoHttpResult<NotificationCollection> result = await BlueskySessionService.Instance.Agent.ListNotifications(limit: PageSize, cursor: _cursor);
             if (!result.Succeeded || result.Result is null)
                 return;
@@ -189,6 +201,12 @@ public sealed partial class NotificationsViewModel : ObservableObject
 
         try
         {
+            if (!await BlueskySessionService.Instance.EnsureAuthenticatedAsync())
+            {
+                Error = BlueskySessionService.Instance.AuthenticationError;
+                return;
+            }
+
             var result = await BlueskySessionService.Instance.Agent.UpdateNotificationSeenAt(seenAt);
             if (!result.Succeeded)
                 LogService.Warn("Notifications", $"UpdateSeenAt failed: {(int)result.StatusCode} {result.AtErrorDetail?.Error}");

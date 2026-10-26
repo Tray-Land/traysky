@@ -87,7 +87,11 @@ public sealed partial class ConversationViewModel : ObservableObject
             }
 
             BlueskySessionService session = BlueskySessionService.Instance;
-            await session.EnsureAuthenticatedAsync();
+            if (!await session.EnsureAuthenticatedAsync())
+            {
+                Error = session.AuthenticationError;
+                return;
+            }
 
             AtProtoHttpResult<ChatMessages> result = await session.Agent.GetMessages(conversation.Id, limit: PageSize);
             if (!result.Succeeded || result.Result is null)
@@ -325,7 +329,11 @@ public sealed partial class ConversationViewModel : ObservableObject
 
         try
         {
-            await BlueskySessionService.Instance.EnsureAuthenticatedAsync();
+            if (!await BlueskySessionService.Instance.EnsureAuthenticatedAsync())
+            {
+                Restore(BlueskySessionService.Instance.AuthenticationError);
+                return;
+            }
             var result = await BlueskySessionService.Instance.Agent.DeleteMessageForSelf(Conversation.Id, message.Id);
             if (!result.Succeeded)
             {
@@ -355,7 +363,12 @@ public sealed partial class ConversationViewModel : ObservableObject
 
         try
         {
-            await BlueskySessionService.Instance.EnsureAuthenticatedAsync();
+            if (!await BlueskySessionService.Instance.EnsureAuthenticatedAsync())
+            {
+                conversation.IsMuted = !mute;
+                Error = BlueskySessionService.Instance.AuthenticationError;
+                return;
+            }
             bool ok;
             System.Net.HttpStatusCode status;
             AtErrorDetail? detail;
@@ -400,7 +413,11 @@ public sealed partial class ConversationViewModel : ObservableObject
         {
             try
             {
-                await BlueskySessionService.Instance.EnsureAuthenticatedAsync();
+                if (!await BlueskySessionService.Instance.EnsureAuthenticatedAsync())
+                {
+                    Error = BlueskySessionService.Instance.AuthenticationError;
+                    return;
+                }
                 var result = await BlueskySessionService.Instance.Agent.LeaveConversation(conversation.Id);
                 if (!result.Succeeded)
                 {
@@ -448,7 +465,11 @@ public sealed partial class ConversationViewModel : ObservableObject
             }
             else
             {
-                await BlueskySessionService.Instance.EnsureAuthenticatedAsync();
+                if (!await BlueskySessionService.Instance.EnsureAuthenticatedAsync())
+                {
+                    Error = BlueskySessionService.Instance.AuthenticationError;
+                    return;
+                }
 
                 AtProtoHttpResult<MessageView> result = await BlueskySessionService.Instance.Agent.SendMessage(Conversation.Id, text, extractFacets: true);
                 if (!result.Succeeded || result.Result is null)
@@ -514,7 +535,12 @@ public sealed partial class ConversationViewModel : ObservableObject
         try
         {
             BlueskySessionService session = BlueskySessionService.Instance;
-            await session.EnsureAuthenticatedAsync();
+            if (!await session.EnsureAuthenticatedAsync())
+            {
+                Apply(!remove);
+                Error = session.AuthenticationError;
+                return;
+            }
 
             bool succeeded;
             System.Net.HttpStatusCode status;
