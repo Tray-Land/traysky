@@ -66,6 +66,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="$(ReleaseAppInstallerPath)" Condition="'$(ReleaseAppInstallerPath)' != ''">
+      <Link>Update.appinstaller</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Update="Assets\*.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
