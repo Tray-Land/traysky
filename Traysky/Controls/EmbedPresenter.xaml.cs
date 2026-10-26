@@ -55,8 +55,45 @@ public sealed partial class EmbedPresenter : UserControl
 
     public string AtHandle(string? handle) => string.IsNullOrEmpty(handle) ? string.Empty : "@" + handle;
 
-    public DataTemplate ImagesTemplate(bool isVideo) =>
-        (DataTemplate)Resources[isVideo ? "VideoTemplate" : "ImageTemplate"];
+    // Built in code rather than as x:Bind DataTemplates: a template element inherits the card's
+    // PostItem DataContext before the repeater assigns its EmbedImage, and an x:DataType'd
+    // template casts that DataContext, which throws (and crashes the app).
+    public IElementFactory ImageFactory => _imageFactory ??= new EmbedImageFactory(this, isVideo: false);
+
+    public IElementFactory VideoFactory => _videoFactory ??= new EmbedImageFactory(this, isVideo: true);
+
+    public IElementFactory ImagesFactory(bool isVideo) => isVideo ? VideoFactory : ImageFactory;
+
+    private IElementFactory? _imageFactory;
+    private IElementFactory? _videoFactory;
+
+    private sealed class EmbedImageFactory(EmbedPresenter owner, bool isVideo) : IElementFactory
+    {
+        public UIElement GetElement(ElementFactoryGetArgs args)
+        {
+            var view = new EmbedImageView { MaxHeight = 220, IsVideo = isVideo };
+            if (args.Data is EmbedImage image)
+            {
+                view.Item = image;
+                if (!isVideo)
+                    ToolTipService.SetToolTip(view, image.AltText);
+            }
+
+            view.Tapped += owner.Image_Tapped;
+            if (isVideo)
+                view.PopOutRequested += owner.Video_PopOutRequested;
+            return view;
+        }
+
+        public void RecycleElement(ElementFactoryRecycleArgs args)
+        {
+            if (args.Element is EmbedImageView view)
+            {
+                view.Tapped -= owner.Image_Tapped;
+                view.PopOutRequested -= owner.Video_PopOutRequested;
+            }
+        }
+    }
 
     private void Image_Tapped(object sender, TappedRoutedEventArgs e)
     {
