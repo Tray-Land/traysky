@@ -4,6 +4,7 @@ using idunno.AtProto.Authentication;
 using idunno.AtProto.Events;
 using idunno.Bluesky;
 using idunno.Bluesky.Actor;
+using Microsoft.Extensions.Logging;
 using Microsoft.UI.Dispatching;
 using System;
 using System.Reflection;
@@ -42,6 +43,7 @@ public sealed partial class BlueskySessionService : ObservableObject
     private readonly DispatcherQueue _dispatcher;
     private readonly BlueskyAgent _agent;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly object _sessionGate = new();
 
     /// <summary>How long a browser sign-in waits for the redirect before giving up.</summary>
     private static readonly TimeSpan BrowserLoginTimeout = TimeSpan.FromMinutes(10);
@@ -63,6 +65,7 @@ public sealed partial class BlueskySessionService : ObservableObject
 
         _agent = new BlueskyAgent(new BlueskyAgentOptions
         {
+            LoggerFactory = new LoggerFactory(new[] { new OAuthRefreshLoggerProvider(OnOAuthRefreshFailed) }),
             HttpClientOptions = new HttpClientOptions
             {
                 HttpUserAgent = $"Traysky/{version} (+https://github.com/Tray-Land/traysky)",
@@ -87,6 +90,12 @@ public sealed partial class BlueskySessionService : ObservableObject
 
     /// <summary>The shared agent. Callers check <see cref="IsSignedIn"/> first.</summary>
     public BlueskyAgent Agent => _agent;
+
+    public string? SignInError { get; private set; }
+
+    public string AuthenticationError => IsSignedIn && _agent.Credentials is not null
+        ? "Couldn't renew your session. Check your connection and try again."
+        : "Your session expired. Sign in again.";
 
     [ObservableProperty]
     public partial bool IsSignedIn { get; private set; }
@@ -384,36 +393,49 @@ public sealed partial class BlueskySessionService : ObservableObject
             Interlocked.Exchange(ref _transitioning, 0);
         }
 
-        await OnUiAsync(ApplySignedOut).ConfigureAwait(false);
+        await OnUiAsync(() =>
+        {
+            SignInError = null;
+            ApplySignedOut();
+        }).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Makes sure the agent holds an unexpired access token, refreshing it if not. The agent
     /// treats an expired token as "not authenticated" and throws <see cref="AuthenticationRequiredException"/>
-    /// from every call, and its own background refresh timer does not recover when a refresh
-    /// throws (e.g. DNS is not back yet right after the machine wakes). Returns false when
+    /// from authenticated calls. This also retries after a transient refresh failure, such as
+    /// DNS not being back yet right after the machine wakes. Returns false when
     /// the token could not be refreshed; a rejected refresh token signs out via
     /// <see cref="OnTokenRefreshFailed"/>.
     /// </summary>
     public async Task<bool> EnsureAuthenticatedAsync(CancellationToken cancellationToken = default)
     {
-        if (PreviewMode.IsEnabled || _agent.IsAuthenticated)
+        if (PreviewMode.IsEnabled)
             return true;
 
-        if (!IsSignedIn || string.IsNullOrEmpty(_agent.Credentials?.RefreshToken))
+        if (!IsSignedIn)
+            return false;
+
+        if (_agent.IsAuthenticated)
+            return true;
+
+        if (string.IsNullOrEmpty(_agent.Credentials?.RefreshToken))
             return false;
 
         await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             // Another caller may have refreshed while this one waited.
+            if (!IsSignedIn || _agent.Credentials is null)
+                return false;
+
             if (_agent.IsAuthenticated)
                 return true;
 
             LogService.Info("Session", "Access token expired; refreshing");
             bool ok = await _agent.RefreshCredentials(cancellationToken).ConfigureAwait(false);
             if (!ok)
-                LogService.Warn("Session", "Access token refresh was rejected");
+                LogService.Warn("Session", "Access token could not be refreshed");
             return ok;
         }
         catch (Exception ex)
@@ -457,6 +479,7 @@ public sealed partial class BlueskySessionService : ObservableObject
 
     private void ApplySignedIn(string? handle)
     {
+        SignInError = null;
         Did = _agent.Did?.ToString();
         Handle = handle;
         DisplayName ??= handle;
@@ -496,50 +519,84 @@ public sealed partial class BlueskySessionService : ObservableObject
 
     private void OnTokenRefreshFailed(object? sender, TokenRefreshFailedEventArgs e)
     {
-        LogService.Warn("Session", $"Token refresh failed: {e.StatusCode} {e.Error?.Error} {e.Error?.Message}");
+        LogService.Warn("Session", $"Token refresh failed: status={e.StatusCode?.ToString() ?? "unknown"}, error={e.Error?.Error ?? "unknown"}");
 
         // A refresh can fail because the network blinked, in which case the agent keeps trying
         // and the access token may still be valid for a while. Only treat an explicit rejection
         // as "signed out".
         if (e.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.BadRequest)
+            EndRejectedSession(e.RefreshToken);
+    }
+
+    private void OnOAuthRefreshFailed(string error)
+    {
+        LogService.Warn("Session", $"OAuth token refresh failed: {error}");
+        if (OAuthRefreshFailurePolicy.RequiresSignIn(error))
+            EndRejectedSession(_agent.Credentials?.RefreshToken);
+    }
+
+    private void EndRejectedSession(string? refreshToken)
+    {
+        lock (_sessionGate)
         {
+            if (refreshToken is not null &&
+                !string.Equals(_agent.Credentials?.RefreshToken, refreshToken, StringComparison.Ordinal))
+                return;
+
+            // The OAuth logger runs inside the SDK's refresh lock. Clear locally rather than
+            // calling Logout there, which would deadlock and try to revoke an already rejected grant.
+            _agent.Credentials = null;
             _ = SessionStore.Clear();
-            if (Volatile.Read(ref _transitioning) == 0)
-                _dispatcher.TryEnqueue(ApplySignedOut);
         }
+
+        QueueSignedOut("Your session expired. Sign in again.");
     }
 
     private void OnUnauthenticated(object? sender, UnauthenticatedEventArgs e)
     {
-        _ = SessionStore.Clear();
-        if (Volatile.Read(ref _transitioning) == 0)
-            _dispatcher.TryEnqueue(ApplySignedOut);
+        lock (_sessionGate)
+        {
+            if (_agent.Credentials is not null)
+                return;
+            _ = SessionStore.Clear();
+        }
+        QueueSignedOut();
     }
 
-    private async Task Persist(AccessCredentials? credentials)
+    private void QueueSignedOut(string? error = null)
     {
-        if (credentials is null || string.IsNullOrEmpty(credentials.RefreshToken))
-            return;
-
-        string? proofKey = null;
-        string? nonce = null;
-        if (credentials is DPoPAccessCredentials dpop)
+        _dispatcher.TryEnqueue(() =>
         {
-            proofKey = dpop.DPoPProofKey;
-            nonce = dpop.DPoPNonce;
+            if (_agent.Credentials is not null)
+                return;
+
+            if (error is not null)
+                SignInError = error;
+            if (Volatile.Read(ref _transitioning) == 0)
+                ApplySignedOut();
+        });
+    }
+
+    private Task Persist(AccessCredentials? credentials)
+    {
+        lock (_sessionGate)
+        {
+            if (credentials is null || string.IsNullOrEmpty(credentials.RefreshToken) ||
+                !ReferenceEquals(credentials, _agent.Credentials))
+                return Task.CompletedTask;
+
+            return SessionStore.Save(new PersistedSession
+            {
+                Service = credentials.Service.ToString(),
+                Did = credentials.Did?.ToString() ?? _agent.Did?.ToString() ?? string.Empty,
+                Handle = Handle,
+                AuthenticationType = credentials.AuthenticationType.ToString(),
+                RefreshToken = credentials.RefreshToken,
+                DPoPProofKey = (credentials as DPoPAccessCredentials)?.DPoPProofKey,
+                DPoPNonce = (credentials as DPoPAccessCredentials)?.DPoPNonce,
+                SavedAtUtc = DateTimeOffset.UtcNow
+            });
         }
-
-        await SessionStore.Save(new PersistedSession
-        {
-            Service = credentials.Service.ToString(),
-            Did = credentials.Did?.ToString() ?? _agent.Did?.ToString() ?? string.Empty,
-            Handle = Handle,
-            AuthenticationType = credentials.AuthenticationType.ToString(),
-            RefreshToken = credentials.RefreshToken,
-            DPoPProofKey = proofKey,
-            DPoPNonce = nonce,
-            SavedAtUtc = DateTimeOffset.UtcNow
-        }).ConfigureAwait(false);
     }
 
     private Task OnUiAsync(Action action)

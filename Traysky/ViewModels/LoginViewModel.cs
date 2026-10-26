@@ -10,6 +10,11 @@ public sealed partial class LoginViewModel : ObservableObject
 {
     private CancellationTokenSource? _browserSignIn;
 
+    public LoginViewModel()
+    {
+        Error = BlueskySessionService.Instance.SignInError;
+    }
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SignInCommand))]
     [NotifyCanExecuteChangedFor(nameof(SignInWithBrowserCommand))]
