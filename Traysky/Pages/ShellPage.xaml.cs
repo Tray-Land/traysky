@@ -26,6 +26,7 @@ namespace Traysky.Pages;
 /// </summary>
 public sealed partial class ShellPage : Page
 {
+    private const double OverlayCaptionInset = 148;
     private readonly NavigationService _navigation = NavigationService.Instance;
     private bool _suppressTabNavigation;
 
@@ -64,6 +65,7 @@ public sealed partial class ShellPage : Page
         QuitButton.Style = (Style)(window
             ? Resources["CaptionLikeButtonStyle"]
             : Application.Current.Resources["TitleBarButtonStyle"]);
+        UpdateOverlayControlInsets();
     }
 
     /// <summary>Raised when the flyout's title bar (or its icon) is double-tapped: the user wants the standard window.</summary>
@@ -555,8 +557,15 @@ public sealed partial class ShellPage : Page
     /// left unconstrained, the ScrollViewer would size it to its native pixel dimensions.</summary>
     private void OverlayScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        OverlayImage.Width = e.NewSize.Width;
-        OverlayImage.Height = e.NewSize.Height;
+        // Use the viewport, not the outer size: any reserved scrollbar/padding space makes the
+        // outer size larger than the area the content is laid out in, shifting it off-centre.
+        var sv = OverlayScrollViewer;
+        double width = sv.ViewportWidth > 0 ? sv.ViewportWidth : e.NewSize.Width;
+        double height = sv.ViewportHeight > 0 ? sv.ViewportHeight : e.NewSize.Height;
+        // The host grid fills the viewport; the image inside it centres itself and
+        // Stretch="Uniform" fits it, so zoom 1 is fit-to-window.
+        OverlayImageHost.Width = width;
+        OverlayImageHost.Height = height;
     }
 
     private void OverlayImage_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
@@ -597,10 +606,19 @@ public sealed partial class ShellPage : Page
         if (VideoOverlay is null)
             FindName(nameof(VideoOverlay));
 
+        UpdateOverlayControlInsets();
         _currentVideo = request;
         VideoPlayer.PosterSource = request.Thumbnail is null ? null : new BitmapImage(request.Thumbnail);
         VideoPlayer.Source = MediaSource.CreateFromUri(request.PlaylistUri);
         VideoOverlay!.Visibility = Visibility.Visible;
+    }
+
+    private void UpdateOverlayControlInsets()
+    {
+        double right = _isWindowMode ? OverlayCaptionInset : 8;
+        ImageOverlayCloseButton.Margin = new Thickness(8, 8, right, 8);
+        if (VideoOverlayControls is not null)
+            VideoOverlayControls.Margin = new Thickness(8, 8, right, 8);
     }
 
     /// <summary>Swallows taps on the player itself so they toggle/move the transport controls

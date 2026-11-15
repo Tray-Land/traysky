@@ -32,6 +32,17 @@
             <Setter Property="MinHeight" Value="32" />
             <Setter Property="VerticalAlignment" Value="Stretch" />
         </Style>
+
+        <Style x:Key="OverlayIconButtonStyle" BasedOn="{StaticResource DefaultButtonStyle}" TargetType="Button">
+            <Setter Property="Background" Value="#33FFFFFF" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="16" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="MinWidth" Value="32" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
     </Page.Resources>
 
     <!--
@@ -419,32 +430,38 @@
             -->
             <ScrollViewer
                 x:Name="OverlayScrollViewer"
-                Margin="16,44,16,16"
+                Margin="16"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
                 HorizontalScrollBarVisibility="Hidden"
                 HorizontalScrollMode="Auto"
                 MaxZoomFactor="4"
                 MinZoomFactor="1"
                 SizeChanged="OverlayScrollViewer_SizeChanged"
+                VerticalContentAlignment="Center"
                 VerticalScrollBarVisibility="Hidden"
                 VerticalScrollMode="Auto"
                 ZoomMode="Enabled">
-                <Image
-                    x:Name="OverlayImage"
-                    DoubleTapped="OverlayImage_DoubleTapped"
-                    Stretch="Uniform" />
+                <Grid x:Name="OverlayImageHost">
+                    <Image
+                        x:Name="OverlayImage"
+                        DoubleTapped="OverlayImage_DoubleTapped"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Stretch="Uniform" />
+                </Grid>
             </ScrollViewer>
             <Button
+                x:Name="ImageOverlayCloseButton"
                 Width="32"
                 Height="32"
                 Margin="8"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Top"
-                Background="#33FFFFFF"
-                BorderThickness="0"
                 AutomationProperties.AutomationId="ImageOverlayCloseButton"
                 AutomationProperties.Name="Close"
                 Click="ImageOverlayClose_Click"
-                CornerRadius="16"
+                Style="{StaticResource OverlayIconButtonStyle}"
                 ToolTipService.ToolTip="Close">
                 <FontIcon
                     FontSize="13"
@@ -469,6 +486,7 @@
                 Stretch="Uniform"
                 Tapped="VideoPlayer_Tapped" />
             <StackPanel
+                x:Name="VideoOverlayControls"
                 Margin="8"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Top"
@@ -477,12 +495,10 @@
                 <Button
                     Width="32"
                     Height="32"
-                    Background="#33FFFFFF"
-                    BorderThickness="0"
                     AutomationProperties.AutomationId="VideoOverlayPopOutButton"
                     AutomationProperties.Name="Pop out"
                     Click="VideoOverlayPopOut_Click"
-                    CornerRadius="16"
+                    Style="{StaticResource OverlayIconButtonStyle}"
                     ToolTipService.ToolTip="Pop out">
                     <FontIcon
                         FontSize="13"
@@ -492,12 +508,10 @@
                 <Button
                     Width="32"
                     Height="32"
-                    Background="#33FFFFFF"
-                    BorderThickness="0"
                     AutomationProperties.AutomationId="VideoOverlayCloseButton"
                     AutomationProperties.Name="Close"
                     Click="VideoOverlayClose_Click"
-                    CornerRadius="16"
+                    Style="{StaticResource OverlayIconButtonStyle}"
                     ToolTipService.ToolTip="Close">
                     <FontIcon
                         FontSize="13"
