@@ -26,7 +26,7 @@ on the tray plumbing of [Traydio](https://github.com/TheJoeFin/Traydio).
 - 🔐 Sign in through your browser (OAuth), or with an [app password](https://bsky.app/settings/app-passwords);
   the refresh token is stored DPAPI-encrypted, never your password
 - Browser sessions require sign-in again after Bluesky's two-week session limit; expired sessions return to the sign-in page
-- ⚙️ Configurable tray clicks, poll interval, toast types, start with Windows
+- ⚙️ Configurable theme, tray clicks, poll interval, toast types, start with Windows
 - ⌨️ Ctrl+1 / Ctrl+2 tabs, Ctrl+N compose, Ctrl+R refresh, Esc to hide
 
 ## Install and automatic updates

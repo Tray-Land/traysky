@@ -566,11 +566,13 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Apps (and our titlebar) follow a separate light/dark switch from the taskbar - a user can
-    /// run light apps on a dark taskbar or vice versa, so this reads "AppsUseLightTheme" rather
-    /// than <see cref="IsSystemInDarkMode"/>'s "SystemUsesLightTheme".
+    /// Resolves the selected app theme for chrome such as window icons. In System mode this reads
+    /// "AppsUseLightTheme" because Windows can use different themes for apps and the taskbar.
     /// </summary>
-    internal static bool IsAppInDarkMode()
+    internal static bool IsAppInDarkMode() =>
+        AppThemePolicy.IsDark(SettingsService.ThemePreference, IsSystemAppInDarkMode());
+
+    private static bool IsSystemAppInDarkMode()
     {
         try
         {

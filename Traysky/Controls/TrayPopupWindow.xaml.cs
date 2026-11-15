@@ -108,13 +108,18 @@ public sealed partial class TrayPopupWindow : WindowEx
 
         _hwnd = (HWND)WindowNative.GetWindowHandle(this);
 
-        UpdateWindowIcon();
+        ApplyTheme();
         ConfigurePresenter();
         // ConfigureToolWindow();
 
         Activated += OnWindowActivated;
-        Closed += (_, _) => _uiSettings.ColorValuesChanged -= OnColorValuesChanged;
+        Closed += (_, _) =>
+        {
+            _uiSettings.ColorValuesChanged -= OnColorValuesChanged;
+            SettingsService.ThemePreferenceChanged -= OnThemePreferenceChanged;
+        };
         _uiSettings.ColorValuesChanged += OnColorValuesChanged;
+        SettingsService.ThemePreferenceChanged += OnThemePreferenceChanged;
 
         _hideTimer = DispatcherQueue.CreateTimer();
         _hideTimer.Interval = TimeSpan.FromMilliseconds(150);
@@ -364,9 +369,23 @@ public sealed partial class TrayPopupWindow : WindowEx
     private void OnColorValuesChanged(UISettings sender, object args)
     {
         if (DispatcherQueue.HasThreadAccess)
-            UpdateWindowIcon();
+            ApplyTheme();
         else
-            DispatcherQueue.TryEnqueue(UpdateWindowIcon);
+            DispatcherQueue.TryEnqueue(ApplyTheme);
+    }
+
+    private void OnThemePreferenceChanged(object? sender, EventArgs e)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+            ApplyTheme();
+        else
+            DispatcherQueue.TryEnqueue(ApplyTheme);
+    }
+
+    private void ApplyTheme()
+    {
+        ThemeService.Apply(PopupRoot, AppWindow);
+        UpdateWindowIcon();
     }
 
     private void UpdateWindowIcon() =>

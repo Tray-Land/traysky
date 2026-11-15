@@ -54,6 +54,22 @@
                 </StackPanel>
             </Border>
 
+            <!--  Appearance  -->
+            <Border Style="{StaticResource SettingCardStyle}">
+                <StackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource SettingTitleStyle}" Text="Appearance" />
+                    <TextBlock Style="{StaticResource SettingDescriptionStyle}" Text="Choose the app theme. System follows your Windows app theme setting." />
+                    <ComboBox
+                        Header="Theme"
+                        HorizontalAlignment="Stretch"
+                        SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}">
+                        <ComboBoxItem Content="System" />
+                        <ComboBoxItem Content="Light" />
+                        <ComboBoxItem Content="Dark" />
+                    </ComboBox>
+                </StackPanel>
+            </Border>
+
             <!--  Profile  -->
             <Border Style="{StaticResource SettingCardStyle}" Visibility="{x:Bind ViewModel.Session.IsSignedIn, Mode=OneWay}">
                 <StackPanel Spacing="8">

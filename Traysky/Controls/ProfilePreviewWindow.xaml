@@ -15,7 +15,7 @@
         <MicaBackdrop />
     </ex:WindowEx.SystemBackdrop>
 
-    <Grid RowDefinitions="Auto,*">
+    <Grid x:Name="Root" RowDefinitions="Auto,*">
 
         <!--  Custom title bar: Mica shows through, the system caption buttons stay at the right  -->
         <Grid

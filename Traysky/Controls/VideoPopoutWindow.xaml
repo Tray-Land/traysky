@@ -11,10 +11,21 @@
     MinHeight="160"
     mc:Ignorable="d">
 
-    <Grid Background="Black">
-        <MediaPlayerElement
-            x:Name="VideoPlayer"
-            AreTransportControlsEnabled="True"
-            Stretch="Uniform" />
+    <ex:WindowEx.SystemBackdrop>
+        <MicaBackdrop />
+    </ex:WindowEx.SystemBackdrop>
+
+    <Grid x:Name="Root" RowDefinitions="Auto,*">
+        <TitleBar
+            x:Name="AppTitleBar"
+            Title="Traysky video"
+            Height="40" />
+
+        <Grid Grid.Row="1" Background="Black">
+            <MediaPlayerElement
+                x:Name="VideoPlayer"
+                AreTransportControlsEnabled="True"
+                Stretch="Uniform" />
+        </Grid>
     </Grid>
 </ex:WindowEx>

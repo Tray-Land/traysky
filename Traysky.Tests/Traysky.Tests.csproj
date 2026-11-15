@@ -26,6 +26,8 @@
     <Compile Include="..\Traysky\Models\TrayClickAction.cs" Link="Models\TrayClickAction.cs" />
     <Compile Include="..\Traysky\Models\ShellDestination.cs" Link="Models\ShellDestination.cs" />
     <Compile Include="..\Traysky\Models\PersistedSession.cs" Link="Models\PersistedSession.cs" />
+    <Compile Include="..\Traysky\Models\AppThemePreference.cs" Link="Models\AppThemePreference.cs" />
+    <Compile Include="..\Traysky\Services\AppThemePolicy.cs" Link="Services\AppThemePolicy.cs" />
     <Compile Include="..\Traysky\Services\TrayClickPolicy.cs" Link="Services\TrayClickPolicy.cs" />
     <Compile Include="..\Traysky\Services\FacetSegmenter.cs" Link="Services\FacetSegmenter.cs" />
     <Compile Include="..\Traysky\Services\RelativeTimeFormatter.cs" Link="Services\RelativeTimeFormatter.cs" />

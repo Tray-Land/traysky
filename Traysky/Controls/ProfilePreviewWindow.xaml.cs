@@ -29,7 +29,6 @@ public sealed partial class ProfilePreviewWindow : WindowEx
     {
         InitializeComponent();
 
-        AppWindow.SetIcon(App.IsAppInDarkMode() ? "Assets\\Wings-Light.ico" : "Assets\\Wings-Dark.ico");
         IsAlwaysOnTop = true;
         IsMaximizable = false;
         IsMinimizable = true;
@@ -37,16 +36,18 @@ public sealed partial class ProfilePreviewWindow : WindowEx
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
-        AppWindow.TitleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
-        AppWindow.TitleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+        ApplyTheme();
+        Root.ActualThemeChanged += (_, _) => ApplyWindowChrome();
 
         ContentFrame.Navigated += (_, _) =>
             BackButton.Visibility = ContentFrame.CanGoBack ? Visibility.Visible : Visibility.Collapsed;
 
         ComposeViewModel.Instance.Posted += OnPosted;
+        SettingsService.ThemePreferenceChanged += OnThemePreferenceChanged;
         Closed += (_, _) =>
         {
             ComposeViewModel.Instance.Posted -= OnPosted;
+            SettingsService.ThemePreferenceChanged -= OnThemePreferenceChanged;
             s_current = null;
         };
     }
@@ -87,6 +88,29 @@ public sealed partial class ProfilePreviewWindow : WindowEx
     }
 
     private void OnPosted(object? sender, EventArgs e) => Close();
+
+    private void OnThemePreferenceChanged(object? sender, EventArgs e)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+            ApplyTheme();
+        else
+            DispatcherQueue.TryEnqueue(ApplyTheme);
+    }
+
+    private void ApplyTheme()
+    {
+        ThemeService.Apply(Root, AppWindow);
+        UpdateWindowIcon();
+    }
+
+    private void ApplyWindowChrome()
+    {
+        ThemeService.ApplyTitleBar(AppWindow, Root.ActualTheme);
+        UpdateWindowIcon();
+    }
+
+    private void UpdateWindowIcon() =>
+        AppWindow.SetIcon(App.IsAppInDarkMode() ? "Assets\\Wings-Light.ico" : "Assets\\Wings-Dark.ico");
 
     /// <summary>Beside the tray popup with a little space, never over it; in the work area's corner if the popup isn't up.</summary>
     private void SizeAndPlace()

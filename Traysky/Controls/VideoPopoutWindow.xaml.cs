@@ -1,4 +1,6 @@
 using Microsoft.UI.Windowing;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
 using System;
 using Traysky.Services;
@@ -21,6 +23,7 @@ public sealed partial class VideoPopoutWindow : WindowEx
 {
     private const double DefaultWidth = 480;
     private const double MaxDefaultHeight = 540;
+    private const double TitleBarHeight = 40;
     private const int ScreenMargin = 24;
 
     private static VideoPopoutWindow? s_current;
@@ -31,15 +34,21 @@ public sealed partial class VideoPopoutWindow : WindowEx
     {
         InitializeComponent();
 
-        AppWindow.SetIcon(App.IsAppInDarkMode() ? "Assets\\Wings-Light.ico" : "Assets\\Wings-Dark.ico");
         IsAlwaysOnTop = true;
         IsMaximizable = false;
         IsMinimizable = true;
         IsResizable = true;
 
+        ExtendsContentIntoTitleBar = true;
+        SetTitleBar(AppTitleBar);
+        ApplyTheme();
+        Root.ActualThemeChanged += (_, _) => ApplyWindowChrome();
+
+        SettingsService.ThemePreferenceChanged += OnThemePreferenceChanged;
         Closed += (_, _) =>
         {
             ReleasePlayer();
+            SettingsService.ThemePreferenceChanged -= OnThemePreferenceChanged;
             s_current = null;
         };
     }
@@ -63,6 +72,36 @@ public sealed partial class VideoPopoutWindow : WindowEx
     }
 
     public static void CloseCurrent() => s_current?.Close();
+
+    private void OnThemePreferenceChanged(object? sender, EventArgs e)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+            ApplyTheme();
+        else
+            DispatcherQueue.TryEnqueue(ApplyTheme);
+    }
+
+    private void ApplyTheme()
+    {
+        ThemeService.Apply(Root, AppWindow);
+        UpdateWindowIcon();
+    }
+
+    private void ApplyWindowChrome()
+    {
+        ThemeService.ApplyTitleBar(AppWindow, Root.ActualTheme);
+        UpdateWindowIcon();
+    }
+
+    private void UpdateWindowIcon()
+    {
+        string asset = App.IsAppInDarkMode() ? "Wings-Light" : "Wings-Dark";
+        AppWindow.SetIcon($"Assets\\{asset}.ico");
+        AppTitleBar.IconSource = new ImageIconSource
+        {
+            ImageSource = new BitmapImage(new Uri($"ms-appx:///Assets/{asset}.png")),
+        };
+    }
 
     private void Play(VideoViewerRequest request, TimeSpan startAt)
     {
@@ -99,7 +138,7 @@ public sealed partial class VideoPopoutWindow : WindowEx
         double aspect = aspectRatio > 0 ? aspectRatio : 16.0 / 9.0;
         double height = Math.Min(DefaultWidth / aspect, MaxDefaultHeight);
         double width = height * aspect;
-        this.SetWindowSize(width, height);
+        this.SetWindowSize(width, height + TitleBarHeight);
 
         DisplayArea display = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary);
         RectInt32 work = display.WorkArea;

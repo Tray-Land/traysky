@@ -46,6 +46,19 @@ public sealed partial class SettingsViewModel : ObservableObject
         ? $"Signed in as @{Session.Handle}"
         : "Not signed in";
 
+    public int ThemeIndex
+    {
+        get => (int)SettingsService.ThemePreference;
+        set
+        {
+            if (!AppThemePolicy.TryParse(value, out AppThemePreference theme))
+                return;
+
+            SettingsService.ThemePreference = theme;
+            OnPropertyChanged();
+        }
+    }
+
     [RelayCommand]
     private async Task SignOutAsync()
     {

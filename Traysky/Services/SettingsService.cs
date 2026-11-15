@@ -15,6 +15,7 @@ namespace Traysky.Services;
 public static class SettingsService
 {
     private const string IsFirstRunKey = "IsFirstRun";
+    private const string ThemePreferenceKey = "ThemePreference";
     private const string TrayLeftClickActionKey = "TrayLeftClickAction";
     private const string TrayRightClickActionKey = "TrayRightClickAction";
     private const string TrayLeftDoubleClickActionKey = "TrayLeftDoubleClickAction";
@@ -53,12 +54,29 @@ public static class SettingsService
     /// <summary>Raised when <see cref="PollIntervalSeconds"/> changes so the poller can re-arm its timer.</summary>
     public static event EventHandler? PollIntervalChanged;
 
+    /// <summary>Raised when the selected application theme changes.</summary>
+    public static event EventHandler? ThemePreferenceChanged;
+
     private static IPropertySet Values => ApplicationData.Current.LocalSettings.Values;
 
     public static bool IsFirstRun
     {
         get => GetBool(IsFirstRunKey, true);
         set => Set(IsFirstRunKey, value);
+    }
+
+    public static AppThemePreference ThemePreference
+    {
+        get => AppThemePolicy.Parse(GetInt(ThemePreferenceKey, (int)AppThemePreference.System));
+        set
+        {
+            AppThemePreference parsed = AppThemePolicy.Parse((int)value);
+            if (parsed == ThemePreference)
+                return;
+
+            Set(ThemePreferenceKey, (int)parsed);
+            ThemePreferenceChanged?.Invoke(null, EventArgs.Empty);
+        }
     }
 
     public static TrayClickAction TrayLeftClickAction
