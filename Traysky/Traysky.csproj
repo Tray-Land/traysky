@@ -61,7 +61,7 @@
     <!-- Toolkit 8.x still pulls in the monolithic SDK; prevent its old build targets and binaries from mixing with the components. -->
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250108002" ExcludeAssets="all" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" ExcludeAssets="all" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.15" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="11.0.0" />
     <PackageReference Include="WinUIEx" Version="2.9.3" />
   </ItemGroup>
 
