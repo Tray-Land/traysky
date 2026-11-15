@@ -7,6 +7,7 @@ using idunno.Bluesky.Actor;
 using idunno.Bluesky.Chat;
 using idunno.Bluesky.Feed;
 using idunno.Bluesky.Graph;
+using ListItem = Traysky.ViewModels.Items.ListItem;
 using System;
 using System.Collections;
 using System.Collections.Generic;
