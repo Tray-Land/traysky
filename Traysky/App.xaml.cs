@@ -541,11 +541,25 @@ public partial class App : Application
         catch (Exception ex)
         {
             LogService.Warn("Tray", $"SetIcon('{iconPath}') failed: {ex.Message}");
-            try { _trayIcon.SetIcon("Assets/Wings-MonoBlack.ico"); } catch { }
+            try
+            {
+                _trayIcon.SetIcon("Assets/Wings-MonoBlack.ico");
+            }
+            catch (Exception fallbackEx)
+            {
+                LogService.Warn("Tray", $"Fallback icon failed: {fallbackEx.Message}");
+            }
         }
 
-        // SetIcon can clear the native tooltip even when the text is unchanged, so always re-apply.
-        _trayIcon.Tooltip = tooltip;
+        try
+        {
+            // SetIcon can clear the native tooltip even when the text is unchanged, so always re-apply.
+            _trayIcon.Tooltip = tooltip;
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("Tray", $"Updating the tray tooltip failed: {ex.Message}");
+        }
     }
 
     internal static bool IsSystemInDarkMode()
@@ -635,7 +649,7 @@ public partial class App : Application
 
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
-        LogService.Error("App", "Unhandled exception", e.Exception);
+        LogFatal("Unhandled XAML exception", e.Exception, e.Message);
     }
 
     private void OnAppDomainUnhandledException(object sender, System.UnhandledExceptionEventArgs e)
@@ -643,13 +657,26 @@ public partial class App : Application
         // e.ExceptionObject is typed object (not necessarily Exception) per the CLR contract,
         // and the process is already terminating (IsTerminating) by the time this fires - this
         // is best-effort logging, not a chance to recover.
-        LogService.Error("App", $"Unhandled exception on non-UI thread (terminating={e.IsTerminating})", e.ExceptionObject as Exception);
+        LogFatal(
+            $"Unhandled exception on non-UI thread (terminating={e.IsTerminating})",
+            e.ExceptionObject as Exception);
     }
 
     private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
         LogService.Error("App", "Unobserved task exception", e.Exception);
         e.SetObserved();
+    }
+
+    private static void LogFatal(string what, Exception? ex, string? xamlMessage = null)
+    {
+        string detail = xamlMessage is { Length: > 0 } &&
+            !string.Equals(xamlMessage, ex?.Message, StringComparison.Ordinal)
+            ? $"{what} :: {xamlMessage}"
+            : what;
+
+        LogService.Error("App", detail, ex);
+        LogService.FlushToDisk(TimeSpan.FromSeconds(2));
     }
 
     /// <summary>
