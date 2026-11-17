@@ -9,7 +9,7 @@ with your **Home** timeline, your **Notifications**, and a compose box. The icon
 you have unread notifications, and Windows toasts tell you about mentions and replies. That's it —
 the fastest way to post, the calmest way to keep up.
 
-Built with .NET 10, WinUI 3, the Windows App SDK and [idunno.Bluesky](https://bluesky.idunno.dev/),
+Built with .NET 11, WinUI 3, the Windows App SDK and [idunno.Bluesky](https://bluesky.idunno.dev/),
 on the tray plumbing of [Traydio](https://github.com/TheJoeFin/Traydio).
 
 <p align="center">
@@ -46,7 +46,7 @@ App Installer 2021 schema. Direct bundle installs can also enroll through the em
 ## How to build
 
 - Install [Visual Studio 2026](https://visualstudio.microsoft.com/) with the **.NET desktop development**
-  and **Windows application development** (Windows App SDK) workloads, or the .NET 10 SDK.
+  and **Windows application development** (Windows App SDK) workloads, or the .NET 11 SDK.
 - Open `Traysky.slnx` and press F5 (Local Machine), or:
 
 ```
@@ -63,7 +63,7 @@ Debug builds can show sample data: create an empty `preview.flag` file in the pa
 
 From a PowerShell session with the maintainer's `sign-msix` function loaded, run
 `.\build-msix-for-gh.ps1` at the repository root (the copy in `Traysky` forwards to it).
-The script needs the .NET 10 SDK, Windows SDK MakeAppx, the x64/ARM64 publish profiles,
+The script needs the .NET 11 SDK, Windows SDK MakeAppx, the x64/ARM64 publish profiles,
 and authenticated `gh`. Use the same signing identity for every release.
 
 Bump `Identity.Version` in `Traysky\Package.appxmanifest` above the last published version,
