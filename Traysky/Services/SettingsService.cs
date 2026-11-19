@@ -33,6 +33,7 @@ public static class SettingsService
     private const string LastFeedKeyKey = "LastFeedKey";
     private const string ComposeDraftKey = "ComposeDraft";
     private const string RecentHashtagsKey = "RecentHashtags";
+    private const string PostLanguagesKey = "PostLanguages";
     private const string FollowedHashtagsKey = "FollowedHashtags";
     private const string RecentSearchesKey = "RecentSearches";
     private const string ChatLogCursorKey = "ChatLogCursor";
@@ -253,6 +254,13 @@ public static class SettingsService
     {
         get => GetString(ComposeDraftKey, string.Empty);
         set => Set(ComposeDraftKey, value ?? string.Empty);
+    }
+
+    /// <summary>Comma-separated language codes new posts are tagged with (see <see cref="ComposeLanguagePolicy"/>); empty means the UI language.</summary>
+    public static string PostLanguages
+    {
+        get => GetString(PostLanguagesKey, string.Empty);
+        set => Set(PostLanguagesKey, value ?? string.Empty);
     }
 
     /// <summary>Tags chosen from the compose box's '#' suggestion popup, most-recent first (see <see cref="HashtagSuggestionPolicy"/>).</summary>

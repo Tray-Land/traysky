@@ -55,14 +55,14 @@ public static class DraftsService
     }
 
     /// <summary>Saves a new draft and returns its id, or null on failure.</summary>
-    public static async Task<TimestampIdentifier?> CreateAsync(string text, StrongReference? quote, ReplyChoice reply, bool allowQuotes)
+    public static async Task<TimestampIdentifier?> CreateAsync(IReadOnlyList<string> texts, StrongReference? quote, ReplyChoice reply, bool allowQuotes)
     {
         if (!BlueskySessionService.Instance.IsSignedIn)
             return null;
 
         try
         {
-            var result = await BlueskySessionService.Instance.Agent.CreateDraft(Build(text, quote, reply, allowQuotes), CancellationToken.None);
+            var result = await BlueskySessionService.Instance.Agent.CreateDraft(Build(texts, quote, reply, allowQuotes), CancellationToken.None);
             if (result.Succeeded && result.Result is not null)
                 return result.Result;
 
@@ -76,7 +76,7 @@ public static class DraftsService
     }
 
     /// <summary>Rewrites an existing draft in place (a restored draft that was edited and saved again).</summary>
-    public static async Task<bool> UpdateAsync(TimestampIdentifier id, string text, StrongReference? quote, ReplyChoice reply, bool allowQuotes)
+    public static async Task<bool> UpdateAsync(TimestampIdentifier id, IReadOnlyList<string> texts, StrongReference? quote, ReplyChoice reply, bool allowQuotes)
     {
         if (!BlueskySessionService.Instance.IsSignedIn)
             return false;
@@ -84,7 +84,7 @@ public static class DraftsService
         try
         {
             var result = await BlueskySessionService.Instance.Agent.UpdateDraft(
-                new DraftWithId(id, Build(text, quote, reply, allowQuotes)), CancellationToken.None);
+                new DraftWithId(id, Build(texts, quote, reply, allowQuotes)), CancellationToken.None);
             if (result.Succeeded)
                 return true;
 
@@ -117,11 +117,19 @@ public static class DraftsService
         return false;
     }
 
-    private static Draft Build(string text, StrongReference? quote, ReplyChoice reply, bool allowQuotes)
+    private static Draft Build(IReadOnlyList<string> texts, StrongReference? quote, ReplyChoice reply, bool allowQuotes)
     {
-        DraftPost post = quote is null
-            ? new DraftPost(text)
-            : new DraftPost(text, (idunno.Bluesky.PostSelfLabels?)null, null, null, null, null, new List<DraftEmbedRecord> { new(quote) });
+        // One draft post per post of the thread; the quote belongs to the first.
+        List<DraftPost> posts = [];
+        for (int i = 0; i < texts.Count && i < idunno.Bluesky.Maximum.DraftPosts; i++)
+        {
+            posts.Add(i == 0 && quote is not null
+                ? new DraftPost(texts[i], (idunno.Bluesky.PostSelfLabels?)null, null, null, null, null, new List<DraftEmbedRecord> { new(quote) })
+                : new DraftPost(texts[i]));
+        }
+
+        if (posts.Count == 0)
+            posts.Add(quote is null ? new DraftPost(string.Empty) : new DraftPost(string.Empty, (idunno.Bluesky.PostSelfLabels?)null, null, null, null, null, new List<DraftEmbedRecord> { new(quote) }));
 
         IReadOnlyList<GateRule>? rules = InteractionGatePolicy.ToRules(reply);
 
@@ -129,7 +137,7 @@ public static class DraftsService
         IReadOnlyList<ThreadGateRule>? threadRules = rules is null ? null : GatesService.ToThreadRules(rules).ToList();
         IReadOnlyList<PostGateRule>? postRules = allowQuotes ? null : new List<PostGateRule> { new DisableEmbeddingRule() };
 
-        return new Draft(new List<DraftPost> { post }, DeviceId, Environment.MachineName, null!, postRules!, threadRules!);
+        return new Draft(posts, DeviceId, Environment.MachineName, null!, postRules!, threadRules!);
     }
 
     private static DraftItem ToItem(DraftView view)
@@ -144,6 +152,8 @@ public static class DraftsService
         {
             Id = view.Id,
             Text = first?.Text ?? string.Empty,
+            ExtraTexts = draft.Posts?.Skip(1).Select(p => p.Text ?? string.Empty).ToList() ?? [],
+            Summary = SavedThreadPolicy.RemoteSummary(draft.Posts?.Count ?? 1),
             Quote = first?.EmbedRecords?.FirstOrDefault()?.Record,
             Reply = InteractionGatePolicy.FromRules(GatesService.FromThreadRules(draft.ThreadGateAllowRules)),
             AllowQuotes = draft.PostGateEmbeddingRules?.Any(r => r is DisableEmbeddingRule) != true,

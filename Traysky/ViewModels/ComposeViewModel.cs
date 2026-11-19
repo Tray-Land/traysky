@@ -42,10 +42,13 @@ public sealed partial class ComposeViewModel : ObservableObject
         Text = SettingsService.ComposeDraft;
         IsExpanded = Text.Length > 0;
         Drafts.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ShowNoDrafts));
+        ThreadPosts.CollectionChanged += OnThreadPostsChanged;
         Attachments.CollectionChanged += (_, _) =>
         {
             if (!HasVideoAttachment)
                 VideoLimitsText = null;
+            if (!HasAttachments)
+                ContentLabel = ComposeContentLabel.None;
             if (UploadPhase == UploadPhase.Cancelled)
                 SetPhase(UploadPhase.Idle); // the "Upload cancelled" note is stale once the attachments change
             OnPropertyChanged(nameof(HasAttachments));
@@ -58,6 +61,81 @@ public sealed partial class ComposeViewModel : ObservableObject
             OnPropertyChanged(nameof(HasLinkCardPlaceholder));
             PostCommand.NotifyCanExecuteChanged();
         };
+
+        // Both singletons live for the app's life, so these never need undoing.
+        ScheduledPostService scheduler = ScheduledPostService.Instance;
+        scheduler.Changed += (_, _) => _ = ReloadLocalDraftsAsync();
+        scheduler.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ScheduledPostService.MissedCount))
+            {
+                OnPropertyChanged(nameof(HasMissedScheduled));
+                OnPropertyChanged(nameof(MissedScheduledText));
+            }
+        };
+    }
+
+    // ----- Scheduling -----
+
+    /// <summary>A reply goes out with its conversation, so only new posts and quotes can be scheduled.</summary>
+    public bool CanSchedule => ReplyTo is null;
+
+    /// <summary>Said after scheduling, once the box has emptied; gone when typing starts again.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNotice))]
+    public partial string? Notice { get; private set; }
+
+    public bool HasNotice => !string.IsNullOrEmpty(Notice);
+
+    /// <summary>The text when <see cref="Notice"/> was set: it stays until the text really changes, not when the editor echoes it back.</summary>
+    private string _textAtNotice = string.Empty;
+
+    private static string NoticeKey(string text) => text.Replace("\r", string.Empty).Trim();
+
+    private void SetNotice(string? message)
+    {
+        _textAtNotice = NoticeKey(Text);
+        Notice = message;
+    }
+
+    public bool HasMissedScheduled => ScheduledPostService.Instance.MissedCount > 0;
+
+    public string MissedScheduledText => SchedulePolicy.MissedBanner(ScheduledPostService.Instance.MissedCount);
+
+    /// <summary>When the thread in the box was scheduled for before it was opened to edit, so the picker starts there.</summary>
+    private DateTimeOffset? _rescheduleAt;
+
+    /// <summary>Where the schedule picker starts, on the local wall clock.</summary>
+    public DateTime SuggestedScheduleTime()
+    {
+        DateTimeOffset now = DateTimeOffset.Now;
+        return _rescheduleAt is { } previous && previous > now + SchedulePolicy.MinLead
+            ? previous.ToLocalTime().DateTime
+            : SchedulePolicy.DefaultLocalTime(now, TimeZoneInfo.Local);
+    }
+
+    /// <summary>
+    /// Keeps the whole thread on this PC to be posted at <paramref name="at"/> (see
+    /// <see cref="ScheduledPostService"/>) and empties the box. Returns null once it's scheduled, or why it can't be.
+    /// </summary>
+    public async Task<string?> ScheduleAsync(DateTimeOffset at)
+    {
+        if (ReplyTo is not null)
+            return "Replies can't be scheduled. Post it now, or save it as a draft.";
+        if (!BlueskySessionService.Instance.IsSignedIn)
+            return "Sign in to schedule posts.";
+        if (IsPosting)
+            return "Wait for the post that's going out to finish.";
+        if (SchedulePolicy.ValidateTime(at, DateTimeOffset.Now) is { } timeError)
+            return timeError;
+        if (Attachments.Any(a => a.IsOversized) || ThreadPosts.Any(t => t.HasOversized))
+            return "An image is too large for Bluesky. Compress or remove it first.";
+        if (PostTextPolicy.IsOverLimit(Text) || !ThreadPostPolicy.AllFit(ThreadPosts.Select(t => t.Text)))
+            return $"A post is over the {PostTextPolicy.MaxGraphemes}-character limit.";
+        if (!CanPost())
+            return "Write something first.";
+
+        return await SaveDraftCoreAsync(clearAfter: true, scheduleAt: at);
     }
 
     [ObservableProperty]
@@ -77,6 +155,7 @@ public sealed partial class ComposeViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(Placeholder))]
     [NotifyPropertyChangedFor(nameof(InteractionSummary))]
     [NotifyPropertyChangedFor(nameof(HasCustomInteraction))]
+    [NotifyPropertyChangedFor(nameof(CanSchedule))]
     public partial PostItem? ReplyTo { get; private set; }
 
     /// <summary>Who may reply to the post being written. Only applies to a post that starts a thread; a reply uses its thread's.</summary>
@@ -89,6 +168,35 @@ public sealed partial class ComposeViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(InteractionSummary))]
     [NotifyPropertyChangedFor(nameof(HasCustomInteraction))]
     public partial bool AllowQuotes { get; set; } = true;
+
+    /// <summary>The languages this post is tagged with; remembered between posts.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(LanguageLabel))]
+    [NotifyPropertyChangedFor(nameof(LanguageDescription))]
+    public partial IReadOnlyList<string> PostLanguages { get; private set; } =
+        ComposeLanguagePolicy.Resolve(SettingsService.PostLanguages, CultureInfo.CurrentUICulture.TwoLetterISOLanguageName);
+
+    public string LanguageLabel => ComposeLanguagePolicy.Label(PostLanguages);
+
+    public string LanguageDescription => $"Post language: {ComposeLanguagePolicy.Description(PostLanguages)}";
+
+    /// <summary>Ticks or unticks a language, saving the choice. Refused ticks (a fourth language) leave it unchanged.</summary>
+    public void ToggleLanguage(string code)
+    {
+        IReadOnlyList<string> updated = ComposeLanguagePolicy.Toggle(PostLanguages, code);
+        if (ReferenceEquals(updated, PostLanguages))
+            return;
+
+        PostLanguages = updated;
+        SettingsService.PostLanguages = ComposeLanguagePolicy.Serialize(updated);
+    }
+
+    /// <summary>A self-label ("content warning") for this post's media; dropped when the media is removed.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasContentLabel))]
+    public partial ComposeContentLabel ContentLabel { get; set; }
+
+    public bool HasContentLabel => ContentLabel != ComposeContentLabel.None;
 
     /// <summary>"Anyone can reply · Quotes allowed": shown on the compose box's settings button.</summary>
     public string InteractionSummary => InteractionGatePolicy.Summary(ReplySetting, AllowQuotes, ReplyTo is not null);
@@ -258,8 +366,21 @@ public sealed partial class ComposeViewModel : ObservableObject
     private void RemoveAttachment(ComposeAttachmentItem attachment)
     {
         if (UploadProgressPolicy.CanEditAttachments(UploadPhase))
-            Attachments.Remove(attachment);
+            OwnerOf(attachment)?.Remove(attachment);
     }
+
+    /// <summary>The attachment list (the first post's, or a thread post's) that holds <paramref name="attachment"/>, so shared remove / compress commands work in any post.</summary>
+    private ObservableCollection<ComposeAttachmentItem>? OwnerOf(ComposeAttachmentItem attachment) =>
+        Attachments.Contains(attachment)
+            ? Attachments
+            : ThreadPosts.Select(t => t.Attachments).FirstOrDefault(c => c.Contains(attachment));
+
+    /// <summary>The attachments of the post being edited: a thread post's, or the first post's when <paramref name="target"/> is null.</summary>
+    private ObservableCollection<ComposeAttachmentItem> MediaOf(ThreadPostItem? target) => target?.Attachments ?? Attachments;
+
+    private bool CanImage(ThreadPostItem? target) => target?.CanAttachImage ?? CanAttachImage;
+
+    private bool CanVideo(ThreadPostItem? target) => target?.CanAttachVideo ?? CanAttachVideo;
 
     [RelayCommand(CanExecute = nameof(CanCancelUpload))]
     private void CancelUpload() => _uploadCts?.Cancel();
@@ -270,15 +391,21 @@ public sealed partial class ComposeViewModel : ObservableObject
     [RelayCommand]
     private Task AttachVideoAsync() => AttachAsync(ComposeAttachmentKind.Video);
 
-    private async Task AttachAsync(ComposeAttachmentKind kind)
+    [RelayCommand]
+    private Task AttachThreadImageAsync(ThreadPostItem item) => AttachAsync(ComposeAttachmentKind.Image, item);
+
+    [RelayCommand]
+    private Task AttachThreadVideoAsync(ThreadPostItem item) => AttachAsync(ComposeAttachmentKind.Video, item);
+
+    private async Task AttachAsync(ComposeAttachmentKind kind, ThreadPostItem? target = null)
     {
-        if (kind == ComposeAttachmentKind.Image && !CanAttachImage)
+        if (kind == ComposeAttachmentKind.Image && !CanImage(target))
         {
             Error = $"Up to {ComposeAttachmentPolicy.MaxImages} images per post, or one video.";
             return;
         }
 
-        if (kind == ComposeAttachmentKind.Video && !CanAttachVideo)
+        if (kind == ComposeAttachmentKind.Video && !CanVideo(target))
         {
             Error = "A post can have images or one video, not both.";
             return;
@@ -308,20 +435,20 @@ public sealed partial class ComposeViewModel : ObservableObject
         {
             StorageFile? file = await picker.PickSingleFileAsync();
             if (file is not null)
-                await AddVideoAsync(file);
+                await AddVideoAsync(file, target);
             return;
         }
 
         IReadOnlyList<StorageFile> files = await picker.PickMultipleFilesAsync();
         foreach (StorageFile file in files)
         {
-            if (!CanAttachImage)
+            if (!CanImage(target))
             {
                 Error = $"Up to {ComposeAttachmentPolicy.MaxImages} images per post.";
                 break;
             }
 
-            await AddImageAsync(file);
+            await AddImageAsync(file, target);
         }
     }
 
@@ -334,14 +461,14 @@ public sealed partial class ComposeViewModel : ObservableObject
     /// via <see cref="StandardDataFormats.StorageItems"/>, applying the same image/video
     /// exclusivity and count rules as picking files does.
     /// </summary>
-    public async Task TryAttachFromClipboardAsync(DataPackageView dataPackageView)
+    public async Task TryAttachFromClipboardAsync(DataPackageView dataPackageView, ThreadPostItem? target = null)
     {
         Error = null;
 
         if (dataPackageView.Contains(StandardDataFormats.StorageItems))
         {
             IReadOnlyList<IStorageItem> items = await dataPackageView.GetStorageItemsAsync();
-            bool attachedAny = await AddFilesAsync(items.OfType<StorageFile>());
+            bool attachedAny = await AddFilesAsync(items.OfType<StorageFile>(), target);
 
             if (!attachedAny && Error is null && items.Count > 0)
                 Error = "That doesn't contain a supported image or video.";
@@ -351,14 +478,14 @@ public sealed partial class ComposeViewModel : ObservableObject
 
         if (dataPackageView.Contains(StandardDataFormats.Bitmap))
         {
-            if (!CanAttachImage)
+            if (!CanImage(target))
             {
                 Error = $"Up to {ComposeAttachmentPolicy.MaxImages} images per post, or one video.";
                 return;
             }
 
             RandomAccessStreamReference streamRef = await dataPackageView.GetBitmapAsync();
-            await AddClipboardBitmapAsync(streamRef);
+            await AddClipboardBitmapAsync(streamRef, target);
         }
     }
 
@@ -422,7 +549,7 @@ public sealed partial class ComposeViewModel : ObservableObject
     /// Attaches files by extension, applying the image/video exclusivity and count rules; a file
     /// that doesn't fit leaves <see cref="Error"/> set. Returns whether anything was attached.
     /// </summary>
-    private async Task<bool> AddFilesAsync(IEnumerable<StorageFile> files)
+    private async Task<bool> AddFilesAsync(IEnumerable<StorageFile> files, ThreadPostItem? target = null)
     {
         bool attachedAny = false;
 
@@ -431,24 +558,24 @@ public sealed partial class ComposeViewModel : ObservableObject
             string extension = Path.GetExtension(file.Name);
             if (ComposeAttachmentPolicy.IsVideoExtension(extension))
             {
-                if (!CanAttachVideo)
+                if (!CanVideo(target))
                 {
                     Error = "A post can have images or one video, not both.";
                     continue;
                 }
 
-                await AddVideoAsync(file);
+                await AddVideoAsync(file, target);
                 attachedAny = true;
             }
             else if (ComposeAttachmentPolicy.IsImageExtension(extension))
             {
-                if (!CanAttachImage)
+                if (!CanImage(target))
                 {
                     Error = $"Up to {ComposeAttachmentPolicy.MaxImages} images per post, or one video.";
                     continue;
                 }
 
-                await AddImageAsync(file);
+                await AddImageAsync(file, target);
                 attachedAny = true;
             }
         }
@@ -461,7 +588,7 @@ public sealed partial class ComposeViewModel : ObservableObject
     /// as PNG rather than trusted as-is, to match what <see cref="ComposeAttachmentPolicy"/> and
     /// Bluesky's blob upload expect.
     /// </summary>
-    private async Task AddClipboardBitmapAsync(RandomAccessStreamReference streamRef)
+    private async Task AddClipboardBitmapAsync(RandomAccessStreamReference streamRef, ThreadPostItem? target = null)
     {
         using IRandomAccessStreamWithContentType sourceStream = await streamRef.OpenReadAsync();
         BitmapDecoder decoder = await BitmapDecoder.CreateAsync(sourceStream);
@@ -483,10 +610,10 @@ public sealed partial class ComposeViewModel : ObservableObject
             reader.DetachStream();
         }
 
-        await AddImageBytesAsync(bytes, "image/png", $"pasted-{DateTime.Now:yyyyMMddHHmmss}.png");
+        await AddImageBytesAsync(bytes, "image/png", $"pasted-{DateTime.Now:yyyyMMddHHmmss}.png", target);
     }
 
-    private async Task AddImageAsync(StorageFile file)
+    private async Task AddImageAsync(StorageFile file, ThreadPostItem? target = null)
     {
         string extension = Path.GetExtension(file.Name);
         string? mimeType = ComposeAttachmentPolicy.MimeTypeFor(extension);
@@ -496,7 +623,7 @@ public sealed partial class ComposeViewModel : ObservableObject
             return;
         }
 
-        await AddImageBytesAsync(await ReadAllBytesAsync(file), mimeType, file.Name);
+        await AddImageBytesAsync(await ReadAllBytesAsync(file), mimeType, file.Name, target);
     }
 
     /// <summary>
@@ -504,7 +631,7 @@ public sealed partial class ComposeViewModel : ObservableObject
     /// pixel runs automatically; if that isn't enough the image is added flagged as oversized, with a
     /// Compress button that applies the lossy ladder. Animated GIFs can't be re-encoded, so they are rejected.
     /// </summary>
-    private async Task AddImageBytesAsync(byte[] bytes, string mimeType, string fileName)
+    private async Task AddImageBytesAsync(byte[] bytes, string mimeType, string fileName, ThreadPostItem? target = null)
     {
         bool oversized = ComposeAttachmentPolicy.ValidateSize(ComposeAttachmentKind.Image, bytes.Length) is not null;
         int? width = null, height = null;
@@ -532,7 +659,7 @@ public sealed partial class ComposeViewModel : ObservableObject
         using InMemoryRandomAccessStream memoryStream = await ToInMemoryStreamAsync(bytes);
         BitmapDecoder decoder = await BitmapDecoder.CreateAsync(memoryStream);
 
-        Attachments.Add(new ComposeAttachmentItem
+        MediaOf(target).Add(new ComposeAttachmentItem
         {
             Bytes = bytes,
             MimeType = mimeType,
@@ -560,8 +687,9 @@ public sealed partial class ComposeViewModel : ObservableObject
     [RelayCommand]
     private async Task CompressAttachmentAsync(ComposeAttachmentItem attachment)
     {
-        int index = Attachments.IndexOf(attachment);
-        if (index < 0)
+        ObservableCollection<ComposeAttachmentItem>? owner = OwnerOf(attachment);
+        int index = owner?.IndexOf(attachment) ?? -1;
+        if (owner is null || index < 0)
             return;
 
         Error = null;
@@ -572,11 +700,11 @@ public sealed partial class ComposeViewModel : ObservableObject
             return;
         }
 
-        index = Attachments.IndexOf(attachment); // the list may have changed while compressing
+        index = owner.IndexOf(attachment); // the list may have changed while compressing
         if (index < 0)
             return;
 
-        Attachments[index] = new ComposeAttachmentItem
+        owner[index] = new ComposeAttachmentItem
         {
             Bytes = result.Bytes,
             MimeType = "image/jpeg",
@@ -588,7 +716,7 @@ public sealed partial class ComposeViewModel : ObservableObject
         };
     }
 
-    private async Task AddVideoAsync(StorageFile file)
+    private async Task AddVideoAsync(StorageFile file, ThreadPostItem? target = null)
     {
         string extension = Path.GetExtension(file.Name);
         string? mimeType = ComposeAttachmentPolicy.MimeTypeFor(extension);
@@ -624,7 +752,7 @@ public sealed partial class ComposeViewModel : ObservableObject
             }
         }
 
-        Attachments.Add(new ComposeAttachmentItem
+        MediaOf(target).Add(new ComposeAttachmentItem
         {
             Bytes = bytes,
             MimeType = mimeType,
@@ -659,7 +787,7 @@ public sealed partial class ComposeViewModel : ObservableObject
     /// <summary>Collapse back to one line if nothing is typed, no reply/quote is pending, and nothing is attached.</summary>
     public void CollapseIfEmpty()
     {
-        if (string.IsNullOrWhiteSpace(Text) && !HasContext && !HasAttachments)
+        if (string.IsNullOrWhiteSpace(Text) && !HasContext && !HasAttachments && !HasThreadPosts)
             IsExpanded = false;
     }
 
@@ -720,6 +848,8 @@ public sealed partial class ComposeViewModel : ObservableObject
         SettingsService.ComposeDraft = value;
         if (Error is not null)
             Error = null;
+        if (Notice is not null && NoticeKey(value) != _textAtNotice)
+            Notice = null;
 
         _ = UpdateLinkCardAsync(value);
     }
@@ -858,16 +988,19 @@ public sealed partial class ComposeViewModel : ObservableObject
         DraftsStatus = null;
         try
         {
-            List<DraftItem>? drafts = PreviewMode.IsEnabled ? PreviewMode.SampleDrafts() : await DraftsService.GetAllAsync();
-            if (drafts is null)
+            List<DraftItem>? remote = PreviewMode.IsEnabled ? PreviewMode.SampleDrafts() : await DraftsService.GetAllAsync();
+            List<SavedThread> local = PreviewMode.IsEnabled ? [] : await SavedThreadStore.ListAsync();
+
+            if (remote is null && local.Count == 0)
             {
                 DraftsStatus = BlueskySessionService.Instance.IsSignedIn ? "Couldn't load your drafts. Try again in a moment." : "Sign in to use drafts.";
                 return;
             }
 
-            Drafts.Clear();
-            foreach (DraftItem draft in drafts)
-                Drafts.Add(draft);
+            ShowDrafts(local, remote ?? []);
+
+            if (remote is null)
+                DraftsStatus = "Couldn't load your Bluesky drafts, so only the ones saved on this PC are shown.";
         }
         finally
         {
@@ -875,83 +1008,290 @@ public sealed partial class ComposeViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Fills the list: threads waiting for a decision first, then what's scheduled soonest first, then
+    /// drafts newest first. A thread kept on this PC that was mirrored to Bluesky shows once (as the
+    /// local copy, which has the media).
+    /// </summary>
+    private void ShowDrafts(List<SavedThread> local, IEnumerable<DraftItem> remote)
+    {
+        HashSet<string> mirrored = local.Where(t => t.BlueskyDraftId is not null).Select(t => t.BlueskyDraftId!).ToHashSet(StringComparer.Ordinal);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        List<DraftItem> merged = local.Select(t => ToLocalItem(t, now))
+            .Concat(remote.Where(d => d.Id is null || !mirrored.Contains(d.Id.ToString()!)))
+            .OrderBy(d => d.SortGroup)
+            .ThenBy(d => d.SortGroup < 2 ? d.ScheduledAt : null)
+            .ThenByDescending(d => d.SortKey)
+            .ToList();
+
+        Drafts.Clear();
+        foreach (DraftItem draft in merged)
+            Drafts.Add(draft);
+    }
+
+    /// <summary>
+    /// The scheduler posted, failed or cancelled a thread on this PC: redraws the list from disk,
+    /// keeping the Bluesky drafts already shown, so nothing goes over the network while hidden.
+    /// </summary>
+    private async Task ReloadLocalDraftsAsync()
+    {
+        if (IsLoadingDrafts || Drafts.Count == 0 || PreviewMode.IsEnabled)
+            return;
+
+        List<DraftItem> remote = Drafts.Where(d => d.Local is null).ToList();
+        List<SavedThread> local = await SavedThreadStore.ListAsync();
+        if (!IsLoadingDrafts)
+            ShowDrafts(local, remote);
+    }
+
+    /// <summary>
+    /// Sends a scheduled thread now, from its row in the list: early, after it was missed, or to finish
+    /// one that was cut off. The list has closed by then, so the outcome is said in the box.
+    /// </summary>
+    [RelayCommand]
+    private async Task PostDraftNowAsync(DraftItem draft)
+    {
+        if (draft.LocalId is not { } id || PreviewMode.IsEnabled)
+            return;
+
+        Error = null;
+        SetNotice("Posting your scheduled post…");
+        string? problem = await ScheduledPostService.Instance.PostNowAsync(id);
+
+        if (problem is null)
+        {
+            SetNotice("Posted.");
+
+            // The timeline picks this up when it's next shown, as it does for a post from the box.
+            PostedCount++;
+        }
+        else if (problem == SchedulePolicy.CancelledNote)
+        {
+            SetNotice(problem);
+        }
+        else
+        {
+            SetNotice(null);
+            Error = $"Couldn't post it. {problem}";
+        }
+    }
+
     /// <summary>Saves what's in the box as a draft (updating the one it was restored from) and leaves the box as it is.</summary>
     [RelayCommand]
     private Task SaveDraftAsync() => SaveDraftCoreAsync(clearAfter: false);
 
-    /// <summary>Saves the draft and empties the box, for setting a post aside. Refuses while media is attached, since a draft can't hold it.</summary>
+    /// <summary>Saves the whole thread and empties the box, for setting a post aside.</summary>
     [RelayCommand]
     private Task SaveDraftAndClearAsync() => SaveDraftCoreAsync(clearAfter: true);
 
-    private async Task SaveDraftCoreAsync(bool clearAfter)
+    /// <summary>The id of the thread on this PC the box was restored from or last saved as, so saving again updates it.</summary>
+    private string? _savedThreadId;
+
+    private static SavedMedia ToSavedMedia(ComposeAttachmentItem a) => new()
+    {
+        FileName = a.FileName,
+        MimeType = a.MimeType,
+        IsVideo = a.IsVideo,
+        AltText = a.AltText,
+        PixelWidth = a.PixelWidth,
+        PixelHeight = a.PixelHeight,
+        Bytes = a.Bytes
+    };
+
+    private static ComposeAttachmentItem ToAttachment(SavedMedia m)
+    {
+        byte[] bytes = m.Bytes ?? [];
+        return new ComposeAttachmentItem
+        {
+            Bytes = bytes,
+            MimeType = m.MimeType,
+            FileName = m.FileName,
+            Kind = m.IsVideo ? ComposeAttachmentKind.Video : ComposeAttachmentKind.Image,
+            PixelWidth = m.PixelWidth,
+            PixelHeight = m.PixelHeight,
+            // Over the blob limit and not shrunk, as it was when saved; Compress is offered again.
+            IsOversized = !m.IsVideo && ComposeAttachmentPolicy.ValidateSize(ComposeAttachmentKind.Image, bytes.Length) is not null,
+            AltText = m.AltText
+        };
+    }
+
+    /// <summary>Everything in the box as a thread to keep: the first post, then each follow-on that has anything in it.</summary>
+    private SavedThread BuildSavedThread()
+    {
+        var thread = new SavedThread
+        {
+            Id = _savedThreadId ?? Guid.NewGuid().ToString("N"),
+            UpdatedAt = DateTimeOffset.UtcNow,
+            AccountDid = BlueskySessionService.Instance.Did,
+            AccountHandle = BlueskySessionService.Instance.Handle,
+            Langs = [.. PostLanguages],
+            QuoteUri = QuoteOf?.AtUri,
+            QuoteCid = QuoteOf?.Reference?.Cid?.ToString(),
+            LinkCard = _dismissedLinkUri is null,
+            AllowQuotes = AllowQuotes
+        };
+        SavedThreadPolicy.SetReply(thread, ReplyTo is null ? ReplySetting : ReplyChoice.Everyone);
+
+        thread.Posts.Add(new SavedPost
+        {
+            Text = Text.Trim(),
+            Label = ContentLabel.ToString(),
+            Media = Attachments.Select(ToSavedMedia).ToList()
+        });
+
+        foreach (ThreadPostItem item in ThreadPosts.Where(t => ThreadPostPolicy.IsSendable(t.Text, t.Attachments.Count)))
+        {
+            thread.Posts.Add(new SavedPost
+            {
+                Text = item.Text.Trim(),
+                Label = item.ContentLabel.ToString(),
+                Media = item.Attachments.Select(ToSavedMedia).ToList()
+            });
+        }
+
+        return thread;
+    }
+
+    private static DraftItem ToLocalItem(SavedThread thread, DateTimeOffset now) => new()
+    {
+        Local = thread,
+        Id = thread.BlueskyDraftId is { } id && TimestampIdentifier.TryParse(id, out TimestampIdentifier? parsed) ? parsed : null,
+        Text = thread.Posts.FirstOrDefault()?.Text ?? string.Empty,
+        Reply = SavedThreadPolicy.ReplyOf(thread),
+        AllowQuotes = thread.AllowQuotes,
+        Age = RelativeTimeFormatter.Format(thread.UpdatedAt, now),
+        SortKey = thread.UpdatedAt,
+        Summary = SavedThreadPolicy.Summary(thread),
+        ScheduleText = SchedulePolicy.Status(thread, now, TimeZoneInfo.Local, CultureInfo.CurrentCulture),
+        NeedsAttention = SchedulePolicy.NeedsAttention(thread, now),
+        SortGroup = SchedulePolicy.SortGroup(thread, now),
+        Note = SchedulePolicy.NeedsAttention(thread, now) ? SchedulePolicy.Reason(thread) : thread.LastError
+    };
+
+    /// <summary>
+    /// Saves the box as a thread on this PC (and a text-only copy to Bluesky drafts). With
+    /// <paramref name="scheduleAt"/> it is saved to be posted then, and only a copy on this PC will do,
+    /// since that is what the scheduler posts. Returns null when saved, or what went wrong; a plain
+    /// save also says so in <see cref="DraftsStatus"/>.
+    /// </summary>
+    private async Task<string?> SaveDraftCoreAsync(bool clearAfter, DateTimeOffset? scheduleAt = null)
     {
         DraftsStatus = null;
 
-        if (!BlueskySessionService.Instance.IsSignedIn)
+        SavedThread thread = BuildSavedThread();
+        if (!SavedThreadPolicy.HasContent(thread))
         {
-            DraftsStatus = "Sign in to save drafts.";
-            return;
+            DraftsStatus = "Write something first. A draft needs some text, media or a quoted post.";
+            return DraftsStatus;
         }
 
-        if (!DraftPolicy.HasStorableContent(Text, QuoteOf is not null))
-        {
-            DraftsStatus = "Write something first. A draft needs some text or a quoted post.";
-            return;
-        }
+        if (scheduleAt is { } at)
+            SchedulePolicy.Schedule(thread, at);
 
-        if (clearAfter && HasAttachments)
-        {
-            DraftsStatus = "Remove the attached media first, or use Save draft: a draft can't hold images or video.";
-            return;
-        }
-
-        string text = Text.Trim();
+        bool signedIn = BlueskySessionService.Instance.IsSignedIn;
+        string[] texts = [.. thread.Posts.Select(p => p.Text)];
         StrongReference? quote = QuoteOf?.Reference;
         ReplyChoice reply = ReplyTo is null ? ReplySetting : ReplyChoice.Everyone;
 
-        bool saved;
-        if (PreviewMode.IsEnabled)
-            saved = true;
-        else if (_draftId is { } existing)
-            saved = await DraftsService.UpdateAsync(existing, text, quote, reply, AllowQuotes);
-        else
+        // A text-only copy goes to Bluesky drafts so bsky.app and other clients see it; the full thread
+        // (with media) is kept on this PC, tied to that copy by its id.
+        bool mirrored = false;
+        if (signedIn && !PreviewMode.IsEnabled)
         {
-            _draftId = await DraftsService.CreateAsync(text, quote, reply, AllowQuotes);
-            saved = _draftId is not null;
+            if (_draftId is { } existing && await DraftsService.UpdateAsync(existing, texts, quote, reply, AllowQuotes))
+                mirrored = true;
+            else if (await DraftsService.CreateAsync(texts, quote, reply, AllowQuotes) is { } created)
+            {
+                _draftId = created;
+                mirrored = true;
+            }
         }
 
-        if (!saved)
+        thread.BlueskyDraftId = mirrored ? _draftId?.ToString() : null;
+        bool savedLocally = PreviewMode.IsEnabled || await SavedThreadStore.SaveAsync(thread);
+
+        // The scheduler posts the copy on this PC; without one there is nothing to schedule. A Bluesky
+        // copy made above stays an ordinary draft, and the box keeps the thread.
+        if (scheduleAt is not null && !savedLocally)
+            return "Couldn't schedule it: it couldn't be saved on this PC. What you wrote is still here.";
+
+        if (!savedLocally && !mirrored)
         {
             DraftsStatus = "Couldn't save the draft. What you wrote is still here.";
-            return;
+            return DraftsStatus;
         }
 
-        string? note = DraftPolicy.SaveNote(ImageAttachmentCount, HasVideoAttachment, ReplyTo is not null);
+        if (savedLocally)
+            _savedThreadId = thread.Id;
+
+        if (scheduleAt is { } scheduled)
+        {
+            ClearBox();
+            ScheduledPostService.Instance.Refresh();
+            LogService.Info("Schedule", $"Scheduled thread {thread.Id} ({thread.Posts.Count} posts) for {scheduled:o}");
+            bool browserSession = BlueskySessionService.Instance.Agent.Credentials?.AuthenticationType == idunno.AtProto.Authentication.AuthenticationType.OAuth;
+            string? sessionNote = SchedulePolicy.SessionNote(browserSession, scheduled, DateTimeOffset.Now);
+            SetNotice($"Scheduled for {SchedulePolicy.Describe(scheduled, DateTimeOffset.Now, TimeZoneInfo.Local, CultureInfo.CurrentCulture)}. Traysky has to be running then. Change or cancel it from Drafts."
+                + (sessionNote is null ? string.Empty : " " + sessionNote));
+            return null;
+        }
+
+        string? note = SavedThreadPolicy.MirrorNote(SavedThreadPolicy.HasMedia(thread), ReplyTo is not null);
+        string result = !savedLocally
+            ? "Saved to Bluesky as text only; couldn't keep a copy on this PC."
+            : !signedIn ? "Saved on this PC. Sign in to also keep it in your Bluesky drafts."
+            : !mirrored ? "Saved on this PC. Couldn't reach Bluesky, so it isn't in your Bluesky drafts yet."
+            : "Draft saved.";
 
         if (clearAfter)
-        {
-            _draftId = null;
-            Text = string.Empty;
-            ReplyTo = null;
-            QuoteOf = null;
-            ReplySetting = ReplyChoice.Everyone;
-            AllowQuotes = true;
-            IsExpanded = false;
-        }
+            ClearBox();
 
         await RefreshDraftsAsync();
-        DraftsStatus = note is null ? "Draft saved." : $"Draft saved. {note}";
+        DraftsStatus = note is null ? result : $"{result} {note}";
+        return null;
+    }
+
+    /// <summary>Empties the box after its thread was set aside (saved and cleared, or scheduled).</summary>
+    private void ClearBox()
+    {
+        _draftId = null;
+        _savedThreadId = null;
+        _rescheduleAt = null;
+        Text = string.Empty;
+        ReplyTo = null;
+        QuoteOf = null;
+        Attachments.Clear();
+        ThreadPosts.Clear();
+        ContentLabel = ComposeContentLabel.None;
+        ReplySetting = ReplyChoice.Everyone;
+        AllowQuotes = true;
+        IsExpanded = false;
     }
 
     /// <summary>Raised when opening a draft would overwrite what's in the box; the view that has the Drafts flyout open asks, then calls <see cref="RestoreDraftAsync"/>.</summary>
     public event EventHandler<DraftItem>? RestoreConfirmationRequested;
 
+    /// <summary>Why a saved thread can't go into the box right now, or null when it can.</summary>
+    private static string? WhyNotOpen(SavedThread? thread) =>
+        thread is null ? null
+        : ScheduledPostService.Instance.IsPublishing(thread.Id) ? "It's being posted right now."
+        : !SchedulePolicy.CanOpen(thread) ? "Part of this thread is already on Bluesky. Use Post now to send the rest, or delete it."
+        : null;
+
     [RelayCommand]
     private async Task OpenDraftAsync(DraftItem draft)
     {
+        if (WhyNotOpen(draft.Local) is { } why)
+        {
+            DraftsStatus = why;
+            return;
+        }
+
         // Restoring the draft the box already came from loses nothing, so only other content needs a say-so.
-        bool wouldOverwrite = PostTextPolicy.HasDraftContent(Text, Attachments.Count)
-            && !(draft.Id is not null && Equals(draft.Id, _draftId) && draft.Text == Text.Trim());
+        bool sameDraft = ((draft.LocalId is not null && draft.LocalId == _savedThreadId) || (draft.Id is not null && Equals(draft.Id, _draftId)))
+            && draft.Text == Text.Trim()
+            && !HasThreadPosts;
+        bool wouldOverwrite = (PostTextPolicy.HasDraftContent(Text, Attachments.Count) || HasThreadPosts) && !sameDraft;
 
         if (wouldOverwrite && RestoreConfirmationRequested is not null)
         {
@@ -967,28 +1307,111 @@ public sealed partial class ComposeViewModel : ObservableObject
     {
         DraftsStatus = null;
 
-        PostItem? quote = null;
-        if (draft.Quote is { } reference && !PreviewMode.IsEnabled)
+        // The copy on this PC has the media; a thread that exists only on Bluesky has just its text.
+        SavedThread? local = draft.Local;
+        DateTimeOffset? wasScheduledFor = null;
+        if (local is not null && !PreviewMode.IsEnabled)
         {
-            quote = await FetchPostAsync(reference.Uri);
+            // Read again: the scheduler may have posted or tried it since the list was drawn.
+            local = await SavedThreadStore.FindAsync(local.Id);
+            if (local is null)
+            {
+                DraftsStatus = "It's no longer saved on this PC. It may have just been posted.";
+                await ReloadLocalDraftsAsync();
+                return;
+            }
+
+            if (WhyNotOpen(local) is { } why)
+            {
+                DraftsStatus = why;
+                return;
+            }
+
+            // Off the schedule while it's in the box, so the scheduler can't post a copy that's being changed.
+            if (local.ScheduledAt is { } at)
+            {
+                wasScheduledFor = at;
+                SchedulePolicy.Unschedule(local);
+                await SavedThreadStore.SaveDetailsAsync(local);
+                ScheduledPostService.Instance.Refresh();
+            }
+        }
+
+        bool mediaComplete = local is null || await SavedThreadStore.LoadMediaAsync(local);
+
+        AtUri? quoteUri = local is not null
+            ? (!string.IsNullOrEmpty(local.QuoteUri) && AtUri.TryParse(local.QuoteUri, out AtUri? parsedQuote) ? parsedQuote : null)
+            : draft.Quote?.Uri;
+
+        PostItem? quote = null;
+        if (quoteUri is not null && !PreviewMode.IsEnabled)
+        {
+            quote = await FetchPostAsync(quoteUri);
             if (quote is null)
                 DraftsStatus = "The post this draft quoted couldn't be loaded, so the quote was left out.";
         }
 
         ReplyTo = null;
         QuoteOf = quote;
-        Text = draft.Text;
-        ReplySetting = draft.Reply;
-        AllowQuotes = draft.AllowQuotes;
+        Attachments.Clear();
+        ThreadPosts.Clear();
+        ContentLabel = ComposeContentLabel.None;
+
+        if (local is not null)
+            ApplySavedThread(local);
+        else
+        {
+            Text = draft.Text;
+            foreach (string extra in draft.ExtraTexts)
+                ThreadPosts.Add(new ThreadPostItem { Text = extra });
+            ReplySetting = draft.Reply;
+            AllowQuotes = draft.AllowQuotes;
+        }
+
         _draftId = draft.Id;
+        _savedThreadId = draft.LocalId;
+        _rescheduleAt = wasScheduledFor;
         IsExpanded = true;
         Error = null;
 
-        if (DraftsStatus is null && draft.HasNote)
+        if (!mediaComplete)
+            DraftsStatus ??= "Some of this draft's media couldn't be found on this PC, so it was left out.";
+
+        // Said in the box rather than the list, so the Drafts flyout can close; typing clears it.
+        if (wasScheduledFor is { } previous)
+            SetNotice($"Taken off the schedule while you edit it (it was set for {SchedulePolicy.Describe(previous, DateTimeOffset.Now, TimeZoneInfo.Local, CultureInfo.CurrentCulture)}). Schedule it again when it's ready.");
+        else if (DraftsStatus is null && draft.HasNote)
             DraftsStatus = draft.Note;
 
         DraftRestored?.Invoke(this, EventArgs.Empty);
         FocusRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Puts a saved thread's posts, media, content warnings, languages and reply / quote controls into the box.</summary>
+    private void ApplySavedThread(SavedThread thread)
+    {
+        SavedPost first = thread.Posts.FirstOrDefault() ?? new SavedPost();
+        Text = first.Text;
+        foreach (SavedMedia media in first.Media)
+            Attachments.Add(ToAttachment(media));
+        ContentLabel = SavedThreadPolicy.LabelOf(first);
+
+        foreach (SavedPost post in thread.Posts.Skip(1))
+        {
+            var item = new ThreadPostItem { Text = post.Text };
+            foreach (SavedMedia media in post.Media)
+                item.Attachments.Add(ToAttachment(media));
+            item.ContentLabel = SavedThreadPolicy.LabelOf(post);
+            ThreadPosts.Add(item);
+        }
+
+        // This draft's languages apply to it without becoming the new default.
+        IReadOnlyList<string> langs = ComposeLanguagePolicy.Parse(string.Join(',', thread.Langs));
+        if (langs.Count > 0)
+            PostLanguages = langs;
+
+        ReplySetting = SavedThreadPolicy.ReplyOf(thread);
+        AllowQuotes = thread.AllowQuotes;
     }
 
     /// <summary>Raised once a draft is in the box, so the Drafts flyout can close.</summary>
@@ -1001,16 +1424,31 @@ public sealed partial class ComposeViewModel : ObservableObject
         if (index < 0)
             return;
 
+        if (ScheduledPostService.Instance.IsPublishing(draft.LocalId))
+        {
+            DraftsStatus = "It's being posted right now.";
+            return;
+        }
+
         DraftsStatus = null;
         Drafts.RemoveAt(index);
 
-        if (draft.Id is not { } id || PreviewMode.IsEnabled)
+        if (PreviewMode.IsEnabled || (draft.Id is null && draft.LocalId is null))
             return;
 
-        if (await DraftsService.DeleteAsync(id))
+        // The Bluesky copy first: if that can't be removed, nothing is deleted and the row comes back.
+        bool deleted = draft.Id is not { } remoteId || await DraftsService.DeleteAsync(remoteId);
+        if (deleted && draft.LocalId is { } localId)
+            deleted = await SavedThreadStore.DeleteAsync(localId);
+
+        if (deleted)
         {
-            if (Equals(_draftId, id))
+            if (draft.Id is not null && Equals(_draftId, draft.Id))
                 _draftId = null;
+            if (draft.LocalId is not null && draft.LocalId == _savedThreadId)
+                _savedThreadId = null;
+            if (draft.CanPostNow)
+                ScheduledPostService.Instance.Refresh();
             return;
         }
 
@@ -1036,7 +1474,49 @@ public sealed partial class ComposeViewModel : ObservableObject
         }
     }
 
+    /// <summary>Follow-on posts of a thread, written under the first. Each has its own text, media and content warning.</summary>
+    public ObservableCollection<ThreadPostItem> ThreadPosts { get; } = [];
+
+    public bool HasThreadPosts => ThreadPosts.Count > 0;
+
+    public bool CanAddThreadPost => ThreadPostPolicy.CanAdd(1 + ThreadPosts.Count);
+
+    [RelayCommand(CanExecute = nameof(CanAddThreadPost))]
+    private void AddThreadPost() => ThreadPosts.Add(new ThreadPostItem());
+
+    [RelayCommand]
+    private void RemoveThreadPost(ThreadPostItem item) => ThreadPosts.Remove(item);
+
+    private void OnThreadPostsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+            foreach (ThreadPostItem old in e.OldItems)
+                old.PropertyChanged -= OnThreadPostPropertyChanged;
+        if (e.NewItems is not null)
+            foreach (ThreadPostItem added in e.NewItems)
+            {
+                added.PropertyChanged -= OnThreadPostPropertyChanged; // an item can come back after a Clear
+                added.PropertyChanged += OnThreadPostPropertyChanged;
+            }
+
+        for (int i = 0; i < ThreadPosts.Count; i++)
+            ThreadPosts[i].Number = i + 2;
+
+        OnPropertyChanged(nameof(HasThreadPosts));
+        OnPropertyChanged(nameof(CanAddThreadPost));
+        AddThreadPostCommand.NotifyCanExecuteChanged();
+        PostCommand.NotifyCanExecuteChanged();
+    }
+
+    private void OnThreadPostPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(ThreadPostItem.Text) or nameof(ThreadPostItem.HasOversized))
+            PostCommand.NotifyCanExecuteChanged();
+    }
+
     private bool CanPost() => !IsPosting
+        && ThreadPostPolicy.AllFit(ThreadPosts.Select(t => t.Text))
+        && !ThreadPosts.Any(t => t.HasOversized)
         && !Attachments.Any(a => a.IsOversized)
         && (PostTextPolicy.CanPost(Text) || (HasAttachments && !PostTextPolicy.IsOverLimit(Text)));
 
@@ -1053,7 +1533,14 @@ public sealed partial class ComposeViewModel : ObservableObject
         Error = null;
         SetPhase(UploadPhase.Idle);
         string text = Text.Trim();
-        string lang = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+        string[] langs = [.. PostLanguages];
+        // Snapshot the thread before any await: the text boxes stay editable while media uploads.
+        List<(ThreadPostItem Item, string Text)> threadSnapshot = ThreadPosts
+            .Where(t => ThreadPostPolicy.IsSendable(t.Text, t.Attachments.Count))
+            .Select(t => (t, t.Text.Trim()))
+            .ToList();
+        var followOns = new List<FollowOnPost>(threadSnapshot.Count);
+        ComposeContentLabel firstLabel = ContentLabel;
         BlueskyAgent agent = BlueskySessionService.Instance.Agent;
         bool isVideo = HasVideoAttachment;
 
@@ -1065,66 +1552,29 @@ public sealed partial class ComposeViewModel : ObservableObject
         {
             AtProtoHttpResult<CreateRecordResult> result;
 
-            if (HasAttachments)
+            // Every post's media is uploaded before any record is created, so a failed or cancelled
+            // upload leaves nothing half-posted.
+            PreparedMedia? firstMedia = await PrepareMediaAsync(agent, Attachments.ToList(), ct);
+            if (firstMedia is null)
+                return;
+
+            foreach ((ThreadPostItem item, string followText) in threadSnapshot)
             {
-                var builder = new PostBuilder(text, langs: new[] { lang });
+                PreparedMedia? media = await PrepareMediaAsync(agent, item.Attachments.ToList(), ct);
+                if (media is null)
+                    return;
 
-                if (isVideo)
-                {
-                    EmbeddedVideo? video = await UploadVideoAsync(agent, Attachments.First(a => a.IsVideo), ct);
-                    if (video is null)
-                        return;
-
-                    builder.Add(video);
-                }
-                else
-                {
-                    var images = new List<EmbeddedImage>();
-                    SetPhase(UploadProgressPolicy.Begin(UploadPhase));
-                    foreach (ComposeAttachmentItem attachment in Attachments.ToList())
-                    {
-                        AtProtoHttpResult<Blob> uploadResult = await agent.UploadBlob(attachment.Bytes, attachment.MimeType, cancellationToken: ct);
-                        if (!uploadResult.Succeeded || uploadResult.Result is null)
-                        {
-                            Error = "Couldn't upload an image. Try again.";
-                            return;
-                        }
-
-                        images.Add(new EmbeddedImage(
-                            uploadResult.Result,
-                            attachment.AltText,
-                            attachment.HasAspectRatio ? new AspectRatio(attachment.PixelWidth!.Value, attachment.PixelHeight!.Value) : null));
-                    }
-
-                    builder.Add((ICollection<EmbeddedImage>)images);
-                }
-
-                // Past this point the media is uploaded; cancelling is no longer offered and the record is created.
-                SetPhase(UploadProgressPolicy.Complete(UploadPhase), isVideo);
-
-                if (ReplyTo is not null)
-                    builder = await builder.ReplyTo(ReplyTo.Reference, agent);
-                if (QuoteOf is not null)
-                    builder.Add(QuoteOf.Reference);
-
-                await builder.ExtractFacets(new HashtagAwareFacetExtractor(agent.FacetExtractor), CancellationToken.None);
-                result = await agent.Post(builder);
+                followOns.Add(new FollowOnPost(item, followText, media));
             }
-            else
-            {
-                // Always a builder, never agent.Post(text): the library's own extractor would end a tag at a hyphen.
-                var builder = new PostBuilder(text, langs: new[] { lang });
-                if (HasLinkCard && _linkCard is not null)
-                    builder.EmbedRecord(_linkCard);
 
-                if (ReplyTo is not null)
-                    builder = await builder.ReplyTo(ReplyTo.Reference, agent);
-                if (QuoteOf is not null)
-                    builder.Add(QuoteOf.Reference);
+            // Past this point the media is uploaded; cancelling is no longer offered and the records are created.
+            SetPhase(UploadProgressPolicy.Complete(UploadPhase), isVideo);
 
-                await builder.ExtractFacets(new HashtagAwareFacetExtractor(agent.FacetExtractor), CancellationToken.None);
-                result = await agent.Post(builder);
-            }
+            result = await PostPublisher.PostAsync(
+                agent, text, langs, firstLabel, firstMedia,
+                linkCard: HasLinkCard ? _linkCard : null,
+                replyTo: ReplyTo?.Reference,
+                quote: QuoteOf?.Reference);
 
             if (result.Succeeded)
             {
@@ -1145,9 +1595,35 @@ public sealed partial class ComposeViewModel : ObservableObject
                 ReplyTo = null;
                 QuoteOf = null;
                 Attachments.Clear();
+                ContentLabel = ComposeContentLabel.None;
                 ReplySetting = ReplyChoice.Everyone;
                 AllowQuotes = true;
                 IsExpanded = false;
+                SetNotice(null);
+                _rescheduleAt = null;
+
+                // The rest of a thread goes out as replies chained to the post just sent.
+                string? threadNote = null;
+                if (followOns.Count > 0 && result.Result is { } first)
+                {
+                    int sent = await PostFollowOnsAsync(agent, new StrongReference(first.Uri, first.Cid), followOns, langs);
+                    ThreadPosts.Clear();
+                    if (sent < followOns.Count)
+                    {
+                        // What didn't go out stays in the box, as a fresh thread, so nothing typed or attached is lost:
+                        // the first unsent post becomes the box's own post, the rest follow it.
+                        FollowOnPost failed = followOns[sent];
+                        Text = failed.Text;
+                        foreach (ComposeAttachmentItem attachment in failed.Item.Attachments)
+                            Attachments.Add(attachment);
+                        ContentLabel = failed.Item.ContentLabel;
+                        foreach (FollowOnPost rest in followOns.Skip(sent + 1))
+                            ThreadPosts.Add(rest.Item);
+                        IsExpanded = true;
+                        threadNote = ThreadPostPolicy.PartialFailureNote(1 + sent, 1 + followOns.Count);
+                    }
+                }
+
                 PostedCount++;
                 Posted?.Invoke(this, EventArgs.Empty);
 
@@ -1158,8 +1634,16 @@ public sealed partial class ComposeViewModel : ObservableObject
                     _ = DraftsService.DeleteAsync(sentDraft);
                 }
 
+                if (_savedThreadId is { } sentThread)
+                {
+                    _savedThreadId = null;
+                    _ = SavedThreadStore.DeleteAsync(sentThread);
+                }
+
                 if (!gatesApplied)
                     Error = "Posted, but the reply or quote settings didn't apply. Use \"Reply and quote settings\" on the post to try again.";
+                if (threadNote is not null)
+                    Error = Error is null ? threadNote : $"{Error} {threadNote}";
                 return;
             }
 
@@ -1193,62 +1677,62 @@ public sealed partial class ComposeViewModel : ObservableObject
         }
     }
 
+    /// <summary>A follow-on post ready to send: the item it came from, its trimmed text, and its uploaded media.</summary>
+    private sealed record FollowOnPost(ThreadPostItem Item, string Text, PreparedMedia Media);
+
+    internal static MediaUpload ToUpload(ComposeAttachmentItem a) =>
+        new(a.Bytes, a.MimeType, a.FileName, a.IsVideo, a.AltText, a.PixelWidth, a.PixelHeight);
+
     /// <summary>
-    /// Uploads and waits for a video to finish processing. Bluesky's video pipeline is
-    /// asynchronous (transcoding happens server-side), so unlike an image blob this needs a
-    /// poll loop; returns null (with <see cref="Error"/> set) if the upload or processing fails.
+    /// Uploads one post's images, or its video (and waits for processing), showing progress in the box.
+    /// Returns the blobs ready to embed (empty when there is no media), or null with <see cref="Error"/> set when something failed.
     /// </summary>
-    private async Task<EmbeddedVideo?> UploadVideoAsync(BlueskyAgent agent, ComposeAttachmentItem attachment, CancellationToken ct)
+    private async Task<PreparedMedia?> PrepareMediaAsync(BlueskyAgent agent, IReadOnlyList<ComposeAttachmentItem> attachments, CancellationToken ct)
     {
-        SetPhase(UploadProgressPolicy.Begin(UploadPhase), isVideo: true);
-        UploadProgress = 0;
-        VideoUploadOutcome outcome = await VideoUploadService.UploadAsync(
-            agent, attachment.FileName, attachment.Bytes, attachment.MimeType, new Progress<double>(p => UploadProgress = p), ct);
+        if (attachments.Count == 0)
+            return PreparedMedia.None;
 
-        JobStatus? uploaded = outcome.Job;
-        if (outcome.UseSingleRequest)
+        bool isVideo = attachments.Any(a => a.IsVideo);
+        SetPhase(UploadProgressPolicy.Begin(UploadPhase), isVideo);
+
+        var reporter = new UploadReporter
         {
-            // The multipart route isn't usable; fall back to the original single request (no progress).
-            UploadProgress = null;
-            AtProtoHttpResult<JobStatus> uploadResult = await agent.UploadVideo(attachment.FileName, attachment.Bytes, attachment.MimeType, ct);
-            uploaded = uploadResult.Succeeded ? uploadResult.Result : null;
-        }
+            Progress = p => UploadProgress = p,
+            ProcessingStarted = () => SetPhase(UploadProgressPolicy.BeginProcessing(UploadPhase), isVideo: true)
+        };
 
-        if (uploaded is null)
+        MediaResult outcome = await PostPublisher.PrepareMediaAsync(agent, attachments.Select(ToUpload).ToList(), reporter, ct);
+        if (outcome.Media is null)
+            Error = outcome.Error;
+
+        return outcome.Media;
+    }
+
+    /// <summary>Posts each text as a reply to the one before. Returns how many went out; stops at the first failure.</summary>
+    private static async Task<int> PostFollowOnsAsync(BlueskyAgent agent, StrongReference parent, IReadOnlyList<FollowOnPost> posts, string[] langs)
+    {
+        int sent = 0;
+        try
         {
-            Error = outcome.Error ?? "Couldn't upload the video. Try again.";
-            return null;
-        }
-
-        UploadProgress = null;
-        JobStatus job = uploaded;
-        SetPhase(UploadProgressPolicy.BeginProcessing(UploadPhase), isVideo: true);
-
-        // The transcoding job is polled rather than pushed; the budget is bounded because
-        // failing loudly beats spinning forever.
-        for (int attempt = 0; job.State is not (JobState.Completed or JobState.Failed) && !UploadProgressPolicy.IsPollBudgetSpent(attempt); attempt++)
-        {
-            await Task.Delay(UploadProgressPolicy.PollInterval, ct);
-            AtProtoHttpResult<JobStatus> statusResult = await agent.GetJobStatus(job.JobId, ct);
-            if (!statusResult.Succeeded || statusResult.Result is null)
+            foreach (FollowOnPost post in posts)
             {
-                Error = "Couldn't check video processing status.";
-                return null;
+                AtProtoHttpResult<CreateRecordResult> result = await PostPublisher.PostAsync(
+                    agent, post.Text, langs, post.Item.ContentLabel, post.Media, replyTo: parent);
+                if (!result.Succeeded || result.Result is null)
+                {
+                    LogService.Warn("Compose", $"Thread post {sent + 2} failed: {(int)result.StatusCode} {result.AtErrorDetail?.Message}");
+                    break;
+                }
+
+                parent = new StrongReference(result.Result.Uri, result.Result.Cid);
+                sent++;
             }
-
-            job = statusResult.Result;
         }
-
-        if (job.State != JobState.Completed || job.Blob is null)
+        catch (Exception ex)
         {
-            Error = string.IsNullOrEmpty(job.Message) ? "Video processing failed." : job.Message;
-            return null;
+            LogService.Error("Compose", "Thread post threw", ex);
         }
 
-        return new EmbeddedVideo(
-            job.Blob,
-            captions: null,
-            attachment.AltText,
-            attachment.HasAspectRatio ? new AspectRatio(attachment.PixelWidth!.Value, attachment.PixelHeight!.Value) : null);
+        return sent;
     }
 }
