@@ -42,6 +42,12 @@
     <Compile Include="..\Traysky\Services\UploadProgressPolicy.cs" Link="Services\UploadProgressPolicy.cs" />
     <Compile Include="..\Traysky\Services\VideoUploadPolicy.cs" Link="Services\VideoUploadPolicy.cs" />
     <Compile Include="..\Traysky\Services\ComposeDropPolicy.cs" Link="Services\ComposeDropPolicy.cs" />
+    <Compile Include="..\Traysky\Services\ComposeLanguagePolicy.cs" Link="Services\ComposeLanguagePolicy.cs" />
+    <Compile Include="..\Traysky\Services\ContentLabelPolicy.cs" Link="Services\ContentLabelPolicy.cs" />
+    <Compile Include="..\Traysky\Services\ThreadPostPolicy.cs" Link="Services\ThreadPostPolicy.cs" />
+    <Compile Include="..\Traysky\Services\SavedThread.cs" Link="Services\SavedThread.cs" />
+    <Compile Include="..\Traysky\Services\SavedThreadPolicy.cs" Link="Services\SavedThreadPolicy.cs" />
+    <Compile Include="..\Traysky\Services\SchedulePolicy.cs" Link="Services\SchedulePolicy.cs" />
     <Compile Include="..\Traysky\Services\ImageCompressionPolicy.cs" Link="Services\ImageCompressionPolicy.cs" />
     <Compile Include="..\Traysky\Services\RichSuggestTextPolicy.cs" Link="Services\RichSuggestTextPolicy.cs" />
     <Compile Include="..\Traysky\Services\HashtagSuggestionPolicy.cs" Link="Services\HashtagSuggestionPolicy.cs" />
