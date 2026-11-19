@@ -169,6 +169,7 @@ public partial class App : Application
         // Services that must be born on the UI thread (they capture the dispatcher).
         BlueskySessionService session = BlueskySessionService.Instance;
         NotificationPollService poll = NotificationPollService.Instance;
+        ScheduledPostService scheduler = ScheduledPostService.Instance;
 
         _servicesStarted = true;
         session.PropertyChanged += OnSessionPropertyChanged;
@@ -210,6 +211,11 @@ public partial class App : Application
 
         bool restored = await session.TryRestoreAsync();
         LogService.Info("App", restored ? $"Session restored for @{session.Handle}" : "No saved session");
+
+        // Scheduled posts that came due while Traysky wasn't running are asked about now; ones due
+        // later are posted at their time. The one piece of network work that runs with the flyout
+        // hidden besides the badge; see ScheduledPostService for why.
+        _ = scheduler.StartAsync();
 
         if (launchShare is not null)
         {
@@ -710,6 +716,7 @@ public partial class App : Application
             if (_servicesStarted)
             {
                 NotificationPollService.Instance.Stop();
+                ScheduledPostService.Instance.Stop();
                 ToastService.Unregister();
             }
 
