@@ -22,6 +22,9 @@ on the tray plumbing of [Traydio](https://github.com/TheJoeFin/Traydio).
 - 🏠 Home timeline with rich text (links, mentions, hashtags), images, link cards and quotes
 - 🔔 Notifications grouped like the official app ("A, B and 3 others liked your post")
 - ✍️ Compose, reply and quote from the flyout — Ctrl+Enter to post, 300-grapheme counter
+- 🕒 Schedule a post or thread for later. Bluesky has no scheduling of its own, so Traysky posts it
+  at that time and has to be running then. A post that comes due while it isn't running is never sent
+  late on its own: the next launch asks, and Drafts offers Post now or edit
 - ❤️ Like and repost with instant feedback
 - 🔐 Sign in through your browser (OAuth), or with an [app password](https://bsky.app/settings/app-passwords);
   the refresh token is stored DPAPI-encrypted, never your password

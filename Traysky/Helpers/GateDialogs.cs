@@ -162,4 +162,19 @@ public static class GateDialogs
         };
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
+
+    /// <summary>Asks before a scheduled thread is sent ahead of (or after) its time from the drafts list.</summary>
+    public static async Task<bool> ConfirmPostNowAsync(XamlRoot root, string preview)
+    {
+        ContentDialog dialog = new()
+        {
+            XamlRoot = root,
+            Title = "Post this now?",
+            Content = new TextBlock { Text = preview, TextWrapping = TextWrapping.Wrap, MaxLines = 4, TextTrimming = TextTrimming.CharacterEllipsis },
+            PrimaryButtonText = "Post now",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
 }

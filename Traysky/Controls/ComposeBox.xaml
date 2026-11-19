@@ -99,6 +99,109 @@
                 </StackPanel>
             </Border>
         </DataTemplate>
+        <DataTemplate x:Key="ThreadPostTemplate" x:DataType="items:ThreadPostItem">
+            <Grid ColumnSpacing="6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock
+                    VerticalAlignment="Center"
+                    Style="{StaticResource SecondaryTextStyle}"
+                    Text="{x:Bind Label, Mode=OneWay}" />
+                <!--  This post's own picked images / video  -->
+                <ScrollViewer
+                    Grid.Row="2"
+                    Margin="0,6,0,0"
+                    HorizontalScrollBarVisibility="Auto"
+                    HorizontalScrollMode="Auto"
+                    VerticalScrollBarVisibility="Disabled"
+                    VerticalScrollMode="Disabled"
+                    Visibility="{x:Bind HasAttachments, Mode=OneWay}">
+                    <ItemsRepeater ItemTemplate="{StaticResource AttachmentTemplate}" ItemsSource="{x:Bind Attachments}">
+                        <ItemsRepeater.Layout>
+                            <StackLayout Orientation="Horizontal" Spacing="6" />
+                        </ItemsRepeater.Layout>
+                    </ItemsRepeater>
+                </ScrollViewer>
+                <StackPanel
+                    Grid.Row="3"
+                    Margin="0,4,0,0"
+                    Orientation="Horizontal"
+                    Spacing="4">
+                    <Button
+                        AutomationProperties.AutomationId="AttachThreadImageButton"
+                        AutomationProperties.Name="Add image to this post"
+                        Command="{x:Bind vm:ComposeViewModel.Instance.AttachThreadImageCommand}"
+                        CommandParameter="{x:Bind}"
+                        IsEnabled="{x:Bind CanAttachImage, Mode=OneWay}"
+                        Style="{StaticResource PostActionButtonStyle}"
+                        ToolTipService.ToolTip="Add image">
+                        <FontIcon FontSize="14" Glyph="&#xEB9F;" />
+                    </Button>
+                    <Button
+                        AutomationProperties.AutomationId="AttachThreadVideoButton"
+                        AutomationProperties.Name="Add video to this post"
+                        Command="{x:Bind vm:ComposeViewModel.Instance.AttachThreadVideoCommand}"
+                        CommandParameter="{x:Bind}"
+                        IsEnabled="{x:Bind CanAttachVideo, Mode=OneWay}"
+                        Style="{StaticResource PostActionButtonStyle}"
+                        ToolTipService.ToolTip="Add video">
+                        <FontIcon FontSize="14" Glyph="&#xE714;" />
+                    </Button>
+                    <Button
+                        AutomationProperties.AutomationId="ThreadContentLabelButton"
+                        AutomationProperties.Name="Content warning for this post's media"
+                        Foreground="{x:Bind helpers:BindHelpers.BrushFromKey(LabelBrushKey), Mode=OneWay}"
+                        Style="{StaticResource PostActionButtonStyle}"
+                        Tag="{x:Bind}"
+                        ToolTipService.ToolTip="Content warning for the media"
+                        Visibility="{x:Bind HasAttachments, Mode=OneWay}">
+                        <FontIcon FontSize="14" Glyph="&#xE7BA;" />
+                        <Button.Flyout>
+                            <MenuFlyout Opening="ThreadLabelMenu_Opening" Placement="TopEdgeAlignedLeft" />
+                        </Button.Flyout>
+                    </Button>
+                </StackPanel>
+                <Button
+                    Grid.Column="1"
+                    Padding="4"
+                    AutomationProperties.AutomationId="RemoveThreadPostButton"
+                    AutomationProperties.Name="Remove this post from the thread"
+                    Command="{x:Bind vm:ComposeViewModel.Instance.RemoveThreadPostCommand}"
+                    CommandParameter="{x:Bind}"
+                    Style="{StaticResource PostActionButtonStyle}"
+                    ToolTipService.ToolTip="Remove this post">
+                    <FontIcon FontSize="11" Glyph="&#xE711;" />
+                </Button>
+                <TextBox
+                    Grid.Row="1"
+                    AcceptsReturn="True"
+                    AutomationProperties.AutomationId="ThreadPostTextBox"
+                    AutomationProperties.Name="Thread post text"
+                    MaxHeight="160"
+                    MinHeight="56"
+                    Paste="ThreadPostText_Paste"
+                    PlaceholderText="Add another post"
+                    ScrollViewer.VerticalScrollBarVisibility="Auto"
+                    Tag="{x:Bind}"
+                    Text="{x:Bind Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    Grid.Row="1"
+                    Grid.Column="1"
+                    VerticalAlignment="Bottom"
+                    FontSize="12"
+                    Foreground="{x:Bind helpers:BindHelpers.BrushFromKey(CounterBrushKey), Mode=OneWay}"
+                    Text="{x:Bind Counter, Mode=OneWay}" />
+            </Grid>
+        </DataTemplate>
         <DataTemplate x:Key="DraftTemplate" x:DataType="items:DraftItem">
             <Grid ColumnSpacing="4">
                 <Grid.ColumnDefinitions>
@@ -117,7 +220,17 @@
                             Text="{x:Bind Preview}"
                             TextTrimming="CharacterEllipsis"
                             TextWrapping="Wrap" />
+                        <TextBlock
+                            Foreground="{x:Bind helpers:BindHelpers.BrushFromKey(ScheduleBrushKey)}"
+                            Style="{StaticResource SecondaryTextStyle}"
+                            Text="{x:Bind ScheduleText}"
+                            TextWrapping="Wrap"
+                            Visibility="{x:Bind helpers:BindHelpers.VisibleIf(HasScheduleText)}" />
                         <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Age}" />
+                        <TextBlock
+                            Style="{StaticResource SecondaryTextStyle}"
+                            Text="{x:Bind Summary}"
+                            Visibility="{x:Bind helpers:BindHelpers.VisibleIf(HasSummary)}" />
                         <TextBlock
                             Foreground="{ThemeResource SystemFillColorCautionBrush}"
                             Style="{StaticResource SecondaryTextStyle}"
@@ -126,17 +239,31 @@
                             Visibility="{x:Bind helpers:BindHelpers.VisibleIf(HasNote)}" />
                     </StackPanel>
                 </Button>
-                <Button
+                <StackPanel
                     Grid.Column="1"
                     VerticalAlignment="Top"
-                    AutomationProperties.AutomationId="DeleteDraftButton"
-                    AutomationProperties.Name="Delete draft"
-                    Click="DeleteDraft_Click"
-                    Tag="{x:Bind}"
-                    Style="{StaticResource PostActionButtonStyle}"
-                    ToolTipService.ToolTip="Delete draft">
-                    <FontIcon FontSize="12" Glyph="&#xE74D;" />
-                </Button>
+                    Spacing="2">
+                    <Button
+                        AutomationProperties.AutomationId="DeleteDraftButton"
+                        AutomationProperties.Name="Delete draft"
+                        Click="DeleteDraft_Click"
+                        Tag="{x:Bind}"
+                        Style="{StaticResource PostActionButtonStyle}"
+                        ToolTipService.ToolTip="Delete draft">
+                        <FontIcon FontSize="12" Glyph="&#xE74D;" />
+                    </Button>
+                    <!--  Scheduled threads only: send it now instead of waiting (or after it was missed)  -->
+                    <Button
+                        AutomationProperties.AutomationId="PostDraftNowButton"
+                        AutomationProperties.Name="Post now"
+                        Click="PostDraftNow_Click"
+                        Tag="{x:Bind}"
+                        Style="{StaticResource PostActionButtonStyle}"
+                        ToolTipService.ToolTip="Post now"
+                        Visibility="{x:Bind helpers:BindHelpers.VisibleIf(CanPostNow)}">
+                        <FontIcon FontSize="12" Glyph="&#xE724;" />
+                    </Button>
+                </StackPanel>
             </Grid>
         </DataTemplate>
     </UserControl.Resources>
@@ -151,6 +278,20 @@
         BorderThickness="1"
         CornerRadius="10">
         <StackPanel Spacing="6">
+
+            <!--  Scheduled posts that didn't go out (Traysky wasn't running, or they kept failing) wait for a decision  -->
+            <InfoBar
+                IsClosable="False"
+                IsOpen="{x:Bind MissedBarOpen(IsPageMode, ViewModel.HasMissedScheduled), Mode=OneWay}"
+                Message="{x:Bind ViewModel.MissedScheduledText, Mode=OneWay}"
+                Severity="Warning">
+                <InfoBar.ActionButton>
+                    <Button
+                        AutomationProperties.AutomationId="ReviewScheduledButton"
+                        Click="ReviewMissed_Click"
+                        Content="Review" />
+                </InfoBar.ActionButton>
+            </InfoBar>
 
             <!--  Replying to / Quoting strip  -->
             <Grid
@@ -237,6 +378,12 @@
                 Message="{x:Bind ViewModel.Error, Mode=OneWay}"
                 Severity="Error" />
 
+            <InfoBar
+                IsClosable="False"
+                IsOpen="{x:Bind ViewModel.HasNotice, Mode=OneWay}"
+                Message="{x:Bind ViewModel.Notice, Mode=OneWay}"
+                Severity="Informational" />
+
             <!--  Link preview, generated from the first link in the draft once typing pauses  -->
             <ProgressBar
                 IsIndeterminate="True"
@@ -313,6 +460,21 @@
                 </ItemsRepeater>
             </ScrollViewer>
 
+            <!--  Follow-on posts of a thread (text only); each replies to the one above  -->
+            <StackPanel Spacing="6" Visibility="{x:Bind ViewModel.IsExpanded, Mode=OneWay}">
+                <ItemsRepeater ItemTemplate="{StaticResource ThreadPostTemplate}" ItemsSource="{x:Bind ViewModel.ThreadPosts}">
+                    <ItemsRepeater.Layout>
+                        <StackLayout Orientation="Vertical" Spacing="8" />
+                    </ItemsRepeater.Layout>
+                </ItemsRepeater>
+                <HyperlinkButton
+                    Padding="4,0"
+                    AutomationProperties.AutomationId="AddThreadPostButton"
+                    Command="{x:Bind ViewModel.AddThreadPostCommand}"
+                    Content="+ Add another post"
+                    ToolTipService.ToolTip="Continue as a thread: each post replies to the one before" />
+            </StackPanel>
+
             <!--  Attach + counter + Post button; only while expanded  -->
             <Grid
                 animations:Implicit.HideAnimations="{StaticResource ImplicitFadeHideAnimations}"
@@ -326,6 +488,10 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
@@ -358,6 +524,15 @@
                 </Button>
                 <Button
                     Grid.Column="2"
+                    AutomationProperties.AutomationId="EmojiButton"
+                    AutomationProperties.Name="Add emoji"
+                    Click="Emoji_Click"
+                    Style="{StaticResource PostActionButtonStyle}"
+                    ToolTipService.ToolTip="Add emoji (Win+.)">
+                    <FontIcon FontSize="14" Glyph="&#xE76E;" />
+                </Button>
+                <Button
+                    Grid.Column="3"
                     AutomationProperties.AutomationId="InteractionSettingsButton"
                     AutomationProperties.Name="Reply and quote settings"
                     Click="Interaction_Click"
@@ -367,7 +542,8 @@
                     <FontIcon FontSize="14" Glyph="&#xE72E;" />
                 </Button>
                 <Button
-                    Grid.Column="3"
+                    x:Name="DraftsButton"
+                    Grid.Column="4"
                     AutomationProperties.AutomationId="DraftsButton"
                     AutomationProperties.Name="Drafts"
                     Style="{StaticResource PostActionButtonStyle}"
@@ -415,9 +591,54 @@
                         </Flyout>
                     </Button.Flyout>
                 </Button>
+                <!--  New posts and quotes only: a reply goes out with its conversation  -->
+                <Button
+                    Grid.Column="5"
+                    AutomationProperties.AutomationId="ScheduleButton"
+                    AutomationProperties.Name="Schedule post"
+                    Style="{StaticResource PostActionButtonStyle}"
+                    ToolTipService.ToolTip="Schedule post"
+                    Visibility="{x:Bind ViewModel.CanSchedule, Mode=OneWay}">
+                    <FontIcon FontSize="14" Glyph="&#xE823;" />
+                    <Button.Flyout>
+                        <Flyout x:Name="ScheduleFlyout" Opening="ScheduleFlyout_Opening" Placement="TopEdgeAlignedLeft">
+                            <StackPanel Width="280" Spacing="8">
+                                <TextBlock FontWeight="SemiBold" Text="Schedule post" />
+                                <TextBlock
+                                    Style="{StaticResource SecondaryTextStyle}"
+                                    Text="Traysky posts the whole thread at this time, so it has to be running then. If this PC is off or asleep, you'll be asked about it next time. Posting or deleting its copy in your Bluesky drafts cancels it."
+                                    TextWrapping="Wrap" />
+                                <CalendarDatePicker
+                                    x:Name="ScheduleDate"
+                                    HorizontalAlignment="Stretch"
+                                    AutomationProperties.AutomationId="ScheduleDatePicker"
+                                    Header="Date" />
+                                <TimePicker
+                                    x:Name="ScheduleTime"
+                                    HorizontalAlignment="Stretch"
+                                    AutomationProperties.AutomationId="ScheduleTimePicker"
+                                    Header="Time"
+                                    MinuteIncrement="5" />
+                                <TextBlock
+                                    x:Name="ScheduleError"
+                                    Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                    Style="{StaticResource SecondaryTextStyle}"
+                                    TextWrapping="Wrap"
+                                    Visibility="Collapsed" />
+                                <Button
+                                    x:Name="ScheduleConfirmButton"
+                                    HorizontalAlignment="Stretch"
+                                    AutomationProperties.AutomationId="ConfirmScheduleButton"
+                                    Click="ScheduleConfirm_Click"
+                                    Content="Schedule"
+                                    Style="{StaticResource AccentButtonStyle}" />
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
                 <Button
                     x:Name="MentionsButton"
-                    Grid.Column="4"
+                    Grid.Column="6"
                     AutomationProperties.AutomationId="MentionsButton"
                     AutomationProperties.Name="Review mentioned profiles"
                     Style="{StaticResource PostActionButtonStyle}"
@@ -432,7 +653,7 @@
                 </Button>
                 <ToggleButton
                     x:Name="PinButton"
-                    Grid.Column="5"
+                    Grid.Column="7"
                     MinWidth="0"
                     MinHeight="28"
                     Padding="6,4"
@@ -445,6 +666,46 @@
                     Visibility="{x:Bind helpers:BindHelpers.VisibleIf(IsPageMode), Mode=OneWay}">
                     <FontIcon FontSize="14" Glyph="&#xE718;" />
                 </ToggleButton>
+                <!--  Content warning on the post's media; only offered once there is media to warn about  -->
+                <Button
+                    Grid.Column="8"
+                    AutomationProperties.AutomationId="ContentLabelButton"
+                    AutomationProperties.Name="Add a content warning"
+                    Foreground="{x:Bind InteractionBrush(ViewModel.HasContentLabel), Mode=OneWay}"
+                    Style="{StaticResource PostActionButtonStyle}"
+                    ToolTipService.ToolTip="Content warning for the media"
+                    Visibility="{x:Bind ViewModel.HasAttachments, Mode=OneWay}">
+                    <FontIcon FontSize="14" Glyph="&#xE7BA;" />
+                    <Button.Flyout>
+                        <Flyout x:Name="LabelFlyout" Opening="LabelFlyout_Opening" Placement="TopEdgeAlignedRight">
+                            <StackPanel x:Name="LabelPanel" Width="260" Spacing="4">
+                                <TextBlock FontWeight="SemiBold" Text="Content warning" />
+                                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="Tells people what the images or video show, so they can choose to see it." TextWrapping="Wrap" />
+                                <RadioButtons x:Name="LabelChoices" SelectionChanged="LabelChoices_SelectionChanged" />
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+                <Button
+                    Grid.Column="9"
+                    Padding="8,4"
+                    AutomationProperties.AutomationId="LanguageButton"
+                    AutomationProperties.Name="Post language"
+                    Style="{StaticResource PostActionButtonStyle}"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.LanguageDescription, Mode=OneWay}">
+                    <TextBlock FontSize="12" FontWeight="SemiBold" Text="{x:Bind ViewModel.LanguageLabel, Mode=OneWay}" />
+                    <Button.Flyout>
+                        <Flyout x:Name="LanguageFlyout" Opening="LanguageFlyout_Opening" Placement="TopEdgeAlignedRight">
+                            <StackPanel Width="240" Spacing="4">
+                                <TextBlock FontWeight="SemiBold" Text="Post language" />
+                                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="Pick up to three. People who filter by language see your post." TextWrapping="Wrap" />
+                                <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto">
+                                    <StackPanel x:Name="LanguagePanel" />
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
                 <StackPanel
                     Grid.Row="{x:Bind ActionRow(IsPageMode), Mode=OneWay}"
                     Grid.Column="{x:Bind StatusColumn(IsPageMode), Mode=OneWay}"
@@ -473,14 +734,14 @@
                 </StackPanel>
                 <TextBlock
                     Grid.Row="{x:Bind ActionRow(IsPageMode), Mode=OneWay}"
-                    Grid.Column="7"
+                    Grid.Column="11"
                     VerticalAlignment="Center"
                     FontSize="12"
                     Foreground="{x:Bind CounterBrush(ViewModel.IsNearLimit, ViewModel.IsOverLimit), Mode=OneWay}"
                     Text="{x:Bind ViewModel.Counter, Mode=OneWay}" />
                 <Button
                     Grid.Row="{x:Bind ActionRow(IsPageMode), Mode=OneWay}"
-                    Grid.Column="8"
+                    Grid.Column="12"
                     MinWidth="64"
                     AutomationProperties.AutomationId="PostButton"
                     Command="{x:Bind ViewModel.PostCommand}"

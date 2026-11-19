@@ -301,6 +301,13 @@ public static class PreviewMode
     /// <summary>Saved drafts for the compose box's Drafts flyout: a plain one, one with reply limits, and one written elsewhere with media.</summary>
     public static List<DraftItem> SampleDrafts() =>
     [
+        new DraftItem
+        {
+            Text = "Release notes for 2.0 go out tomorrow morning.",
+            Age = "5m",
+            ScheduleText = "Scheduled for tomorrow at 9:00 AM",
+            SortGroup = 1
+        },
         new DraftItem { Text = "Thinking about a tray app for tracking release notes, anyone else want one?", Age = "12m" },
         new DraftItem
         {

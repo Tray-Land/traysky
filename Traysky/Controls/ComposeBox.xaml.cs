@@ -3,12 +3,14 @@ using CommunityToolkit.WinUI.Controls;
 using Microsoft.UI.Input;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using Traysky.Services;
 using Traysky.ViewModels;
 using Traysky.ViewModels.Items;
@@ -92,6 +94,9 @@ public sealed partial class ComposeBox : UserControl
             ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
             _lightDismissSuppression?.Dispose();
             _lightDismissSuppression = null;
+            _emojiSuppressionTimer?.Stop();
+            _emojiSuppression?.Dispose();
+            _emojiSuppression = null;
         };
     }
 
@@ -470,6 +475,71 @@ public sealed partial class ComposeBox : UserControl
             ViewModel.RefreshDraftsCommand.Execute(null);
     }
 
+    /// <summary>Posting is public, so sending a scheduled thread early (or late) from the list asks first.</summary>
+    private async void PostDraftNow_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: DraftItem draft } || XamlRoot is not { } root || !ViewModel.PostDraftNowCommand.CanExecute(draft))
+            return;
+
+        DraftsFlyout.Hide();
+        if (await Helpers.GateDialogs.ConfirmPostNowAsync(root, draft.Preview))
+            await ViewModel.PostDraftNowCommand.ExecuteAsync(draft);
+    }
+
+    // ----- Schedule -----
+
+    /// <summary>Only the compose page asks about missed scheduled posts; a post's inline reply box has no room for it.</summary>
+    public bool MissedBarOpen(bool pageMode, bool missed) => pageMode && missed;
+
+    private void ReviewMissed_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.IsExpanded = true;
+        DraftsFlyout.ShowAt(DraftsButton);
+    }
+
+    private void ScheduleFlyout_Opening(object? sender, object e)
+    {
+        DateTime suggested = ViewModel.SuggestedScheduleTime();
+        ScheduleDate.MinDate = new DateTimeOffset(DateTime.Today);
+        ScheduleDate.MaxDate = new DateTimeOffset(DateTime.Today + SchedulePolicy.MaxLead);
+        ScheduleDate.Date = new DateTimeOffset(suggested.Date);
+        ScheduleTime.Time = suggested.TimeOfDay;
+        ScheduleError.Visibility = Visibility.Collapsed;
+        ScheduleConfirmButton.IsEnabled = true;
+    }
+
+    private async void ScheduleConfirm_Click(object sender, RoutedEventArgs e)
+    {
+        if (ScheduleDate.Date is not { } date)
+        {
+            ShowScheduleError("Pick a date.");
+            return;
+        }
+
+        // The picker's date part is the day chosen; the time is on this PC's clock.
+        DateTimeOffset at = SchedulePolicy.FromLocal(date.Date, ScheduleTime.Time, TimeZoneInfo.Local);
+
+        ScheduleConfirmButton.IsEnabled = false;
+        try
+        {
+            string? problem = await ViewModel.ScheduleAsync(at);
+            if (problem is null)
+                ScheduleFlyout.Hide();
+            else
+                ShowScheduleError(problem);
+        }
+        finally
+        {
+            ScheduleConfirmButton.IsEnabled = true;
+        }
+    }
+
+    private void ShowScheduleError(string message)
+    {
+        ScheduleError.Text = message;
+        ScheduleError.Visibility = Visibility.Visible;
+    }
+
     /// <summary>Several boxes share the view model; only the one whose Drafts flyout is open should ask.</summary>
     private async void OnRestoreConfirmationRequested(object? sender, DraftItem draft)
     {
@@ -498,9 +568,9 @@ public sealed partial class ComposeBox : UserControl
     // Action bar: the popup keeps everything on one row; full-page compose moves status/counter/Post to a second row.
     public int ActionRow(bool pageMode) => pageMode ? 1 : 0;
 
-    public int StatusColumn(bool pageMode) => pageMode ? 0 : 6;
+    public int StatusColumn(bool pageMode) => pageMode ? 0 : 10;
 
-    public int StatusColumnSpan(bool pageMode) => pageMode ? 7 : 1;
+    public int StatusColumnSpan(bool pageMode) => pageMode ? 11 : 1;
 
     public double ActionRowSpacing(bool pageMode) => pageMode ? 6 : 0;
 
@@ -529,6 +599,162 @@ public sealed partial class ComposeBox : UserControl
                     ProfilePreviewWindow.Show(tag);
             };
             MentionsPanel.Children.Add(button);
+        }
+    }
+
+    // ----- Emoji picker -----
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, nuint dwExtraInfo);
+
+    private const byte VkLWin = 0x5B;
+    private const byte VkOemPeriod = 0xBE;
+    private const uint KeyEventKeyUp = 0x0002;
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _emojiSuppressionTimer;
+    private IDisposable? _emojiSuppression;
+
+    /// <summary>Opens Windows' own emoji panel (Win+.), which types into whatever has focus: the editor.</summary>
+    private void Emoji_Click(object sender, RoutedEventArgs e)
+    {
+        Editor.Focus(FocusState.Programmatic);
+
+        // The panel is a separate window; without this its taking focus reads as the popup losing it and
+        // light-dismisses the popup. Held for a while, then released, since there's no event for it closing.
+        _emojiSuppression ??= LightDismissSuppressionService.Suppress();
+        _emojiSuppressionTimer ??= DispatcherQueue.CreateTimer();
+        _emojiSuppressionTimer.Interval = TimeSpan.FromSeconds(30);
+        _emojiSuppressionTimer.IsRepeating = false;
+        _emojiSuppressionTimer.Tick -= EmojiSuppressionTimer_Tick;
+        _emojiSuppressionTimer.Tick += EmojiSuppressionTimer_Tick;
+        _emojiSuppressionTimer.Start();
+
+        keybd_event(VkLWin, 0, 0, 0);
+        keybd_event(VkOemPeriod, 0, 0, 0);
+        keybd_event(VkOemPeriod, 0, KeyEventKeyUp, 0);
+        keybd_event(VkLWin, 0, KeyEventKeyUp, 0);
+    }
+
+    private void EmojiSuppressionTimer_Tick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
+    {
+        _emojiSuppression?.Dispose();
+        _emojiSuppression = null;
+    }
+
+    // ----- Content warning -----
+
+    /// <summary>Set while the radio list is being synced from the view model, so that doesn't read as a choice.</summary>
+    private bool _syncingLabelChoice;
+
+    private void LabelFlyout_Opening(object? sender, object e)
+    {
+        _syncingLabelChoice = true;
+        try
+        {
+            if (LabelChoices.Items.Count == 0)
+            {
+                foreach (ComposeContentLabel label in ContentLabelPolicy.Choices)
+                {
+                    var row = new StackPanel();
+                    row.Children.Add(new TextBlock { Text = ContentLabelPolicy.Title(label) });
+                    row.Children.Add(new TextBlock
+                    {
+                        Text = ContentLabelPolicy.Description(label),
+                        Style = (Style)Application.Current.Resources["SecondaryTextStyle"],
+                        TextWrapping = TextWrapping.Wrap
+                    });
+                    LabelChoices.Items.Add(row);
+                }
+            }
+
+            LabelChoices.SelectedIndex = ContentLabelPolicy.Choices.ToList().IndexOf(ViewModel.ContentLabel);
+        }
+        finally
+        {
+            _syncingLabelChoice = false;
+        }
+    }
+
+    private void LabelChoices_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingLabelChoice || LabelChoices.SelectedIndex < 0)
+            return;
+
+        ViewModel.ContentLabel = ContentLabelPolicy.Choices[LabelChoices.SelectedIndex];
+        LabelFlyout.Hide();
+    }
+
+    // ----- Thread posts: each follow-on has its own media and content warning -----
+
+    /// <summary>Builds the menu for the thread post whose button opened it; the choice applies to that post only.</summary>
+    private void ThreadLabelMenu_Opening(object? sender, object e)
+    {
+        if (sender is not MenuFlyout { Target: FrameworkElement { Tag: ThreadPostItem item } } menu)
+            return;
+
+        menu.Items.Clear();
+        foreach (ComposeContentLabel label in ContentLabelPolicy.Choices)
+        {
+            var entry = new RadioMenuFlyoutItem
+            {
+                Text = ContentLabelPolicy.Title(label),
+                GroupName = "ThreadLabel" + item.Number,
+                IsChecked = item.ContentLabel == label
+            };
+            ToolTipService.SetToolTip(entry, ContentLabelPolicy.Description(label));
+            entry.Click += (_, _) => item.ContentLabel = label;
+            menu.Items.Add(entry);
+        }
+    }
+
+    /// <summary>A screenshot or file pasted into a thread post becomes that post's media, as it does for the first post.</summary>
+    private async void ThreadPostText_Paste(object sender, TextControlPasteEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: ThreadPostItem item })
+            return;
+
+        DataPackageView dataPackageView = Clipboard.GetContent();
+        if (!dataPackageView.Contains(StandardDataFormats.Bitmap) && !dataPackageView.Contains(StandardDataFormats.StorageItems))
+            return;
+
+        e.Handled = true;
+        await ViewModel.TryAttachFromClipboardAsync(dataPackageView, item);
+    }
+
+    // ----- Post language -----
+
+    private void LanguageFlyout_Opening(object? sender, object e)
+    {
+        if (LanguagePanel.Children.Count == 0)
+        {
+            foreach (ComposeLanguagePolicy.Language language in ComposeLanguagePolicy.All)
+            {
+                var box = new CheckBox { Content = language.Name, Tag = language.Code, MinWidth = 0 };
+                box.Click += LanguageBox_Click;
+                LanguagePanel.Children.Add(box);
+            }
+        }
+
+        SyncLanguageBoxes();
+    }
+
+    private void LanguageBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is CheckBox { Tag: string code })
+            ViewModel.ToggleLanguage(code);
+
+        SyncLanguageBoxes();
+    }
+
+    /// <summary>Ticks what the view model holds and disables the rest once three are chosen.</summary>
+    private void SyncLanguageBoxes()
+    {
+        foreach (CheckBox box in LanguagePanel.Children.OfType<CheckBox>())
+        {
+            string code = (string)box.Tag;
+            bool selected = ViewModel.PostLanguages.Contains(code);
+            box.IsChecked = selected;
+            box.IsEnabled = ComposeLanguagePolicy.CanTick(ViewModel.PostLanguages, code);
         }
     }
 
