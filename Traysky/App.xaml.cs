@@ -649,7 +649,19 @@ public partial class App : Application
 
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
-        LogFatal("Unhandled XAML exception", e.Exception, e.Message);
+        // A COMException raised from inside a XAML callback (a timer tick, a layout pass, a
+        // collection change) arrives with no managed stack and no message, and takes the whole tray
+        // app down (0xc000027b stowed exception) although nothing it touched is in a bad state: the
+        // flyout is just a view over the view models. Log it and carry on; anything that is not a
+        // COMException still terminates as before so real bugs are not hidden.
+        bool recoverable = e.Exception is System.Runtime.InteropServices.COMException;
+        LogFatal(
+            recoverable ? "Unhandled XAML exception (survived)" : "Unhandled XAML exception",
+            e.Exception,
+            e.Message is { Length: > 0 } message ? $"{message} [HRESULT 0x{e.Exception?.HResult ?? 0:X8}]" : $"[HRESULT 0x{e.Exception?.HResult ?? 0:X8}]");
+
+        if (recoverable)
+            e.Handled = true;
     }
 
     private void OnAppDomainUnhandledException(object sender, System.UnhandledExceptionEventArgs e)
